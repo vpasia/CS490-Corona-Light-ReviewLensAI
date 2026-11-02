@@ -14,18 +14,18 @@
 | Layer | Choice |
 | ----- | ----- |
 | Frontend | React \+ Javascript |
-| Styling | Tailwind CSS \+ shadcn/ui |
+| Styling | shadcn/ui |
 | Backend | [Node.js](http://Node.js) and Express.js |
 | Database | Cloud Firestore |
 | Authentication | Firebase Authentication |
 | Review Ingestion | Canopy AI |
 | AI | Gemini 3.5 Flash Lite (relevance check), Gemini 3.8 Flash (analysis) |
-| Hosting | Firebase Hosting {frontend}, Render {backend} (???) |
-| Lint / Format | ESLint \+ Prettier (???) |
+| Hosting | Firebase Hosting {frontend}, Render {backend} |
+| Lint / Format | ESLint \+ Prettier  |
 | Testing | Vitest \+ React Testing Library {frontend}, Jest \+ Supertest {backend} |
 
 2. **Repository and Folder Organization**  
-   1. (???)  
+   1.   
       frontend/  
         src/  
           app/           \# router, providers, layout shell (sidebar)  
@@ -73,7 +73,7 @@
       1. Names say what something is or does. No abbreviations except common ones like ID, URL, or API.  
    3. ENG-06:  
       1. Boolean names read as yes/no questions like isLoading, hasReviews.  
-4. **Formatting and Linting (???)**  
+4. **Formatting and Linting**   
    1. ENG-07:  
       1. Formatting is enforced by Prettier using the committed .prettierrc, not by editor settings:  
          1. { "semi": true, "singleQuote": true, "trailingComma": "all", "printWidth": 100, "tabWidth": 2 }  

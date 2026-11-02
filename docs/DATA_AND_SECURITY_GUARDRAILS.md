@@ -68,7 +68,7 @@ SEC-01:
          1. Set userId from req.user.uid; updates and deletes run only after the ownership check.  
    2. SEC-14:  
       1. Ownership checks live in one shared helper (services/ownership.js, e.g. getOwnedProduct(uid, productId)) used by every service, not rewritten in each route.  
-   3. SEC-15: (???)  
+   3. SEC-15:   
       1. Firestore Security Rules are committed in firestore.rules:
 
          rules\_version \= '2';
@@ -115,7 +115,7 @@ SEC-01:
 
       
 
-| Secret / Setting | Lives in | Visible to Browser? |
+| Secret / Setting | Lives in | Visible to Browser |
 | ----- | ----- | ----- |
 | CANOPY\_API\_KEY | Backend .env / Render env vars | Never |
 | GEMINI\_API\_KEY | Backend .env / Render env vars | Never |
@@ -164,7 +164,7 @@ SEC-01:
       1. A PR that adds or changes a user-data endpoint is not approved without the matching rows from the table above.
 
 \_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_  
-**Prohibited Data-Access Patterns** (???)  
+**Prohibited Data-Access Patterns**   
 Never do any of the following. Reviewers reject PRs that contain them.
 
 | Prohibited | Do Instead |
