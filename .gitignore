@@ -10,7 +10,8 @@ dist-ssr
 coverage/
 
 # production
-.env*
+.env
+.env.local
 build/
 
 # Editor directories and files
