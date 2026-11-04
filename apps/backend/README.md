@@ -58,17 +58,7 @@ Create a `.env` file in the project root.
 touch .env
 ```
 
-Add the required environment variables:
-
-```env
-PORT=3000
-NODE_ENV=development
-CLIENT_URL=http://localhost:5173
-```
-
-Additional environment variables may be required depending on the application configuration, such as database credentials or authentication secrets.
-
-Refer to `.env.example` for the complete list of required variables, if available.
+Add the required environment variables. Refer to `.env.example` for the complete list of required variables, if available.
 
 **Note:** Never commit your `.env` file or expose sensitive credentials.
 
@@ -89,7 +79,7 @@ npm start
 The backend should now be running at:
 
 ```text
-http://localhost:3000
+http://localhost:8000
 ```
 
 ### 5. Verify the Application
@@ -97,7 +87,7 @@ http://localhost:3000
 If the application has a health-check endpoint, visit:
 
 ```text
-http://localhost:3000/health
+http://localhost:8000/health
 ```
 
 You can also test API endpoints using Postman or Insomnia.
