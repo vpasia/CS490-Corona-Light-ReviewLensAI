@@ -1,0 +1,121 @@
+name: CI
+
+on:
+  pull_request:
+    branches:
+      - main
+
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# Cancel outdated runs when new commits are pushed to the same PR.
+concurrency:
+  group: ci-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  frontend:
+    name: Frontend / Tests and Build
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    defaults:
+      run:
+        working-directory: apps/frontend
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: apps/frontend/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run ESLINT
+        run: npm run lint
+
+      - name: Run Vitest
+        run: npm test -- --run
+        env:
+          WEB_HOST: localhost
+          WEB_PORT: 5173
+          VITE_API_BASE_URL: http://localhost:8000
+
+          # Dummy Firebase configuration
+          VITE_FIREBASE_API_KEY: ci-dummy-api-key
+          VITE_FIREBASE_AUTH_DOMAIN: ci-dummy.firebaseapp.com
+          VITE_FIREBASE_PROJECT_ID: ci-dummy
+          VITE_FIREBASE_STORAGE_BUCKET: ci-dummy.firebasestorage.googleapis.com
+          VITE_FIREBASE_MESSAGING_SENDER_ID: "123456789"
+          VITE_FIREBASE_APP_ID: "1:123456789:web:ci-dummy"
+
+      - name: Build frontend
+        run: npm run build
+        env:
+          WEB_HOST: localhost
+          WEB_PORT: 5173
+          VITE_API_BASE_URL: http://localhost:8000
+
+          # Dummy Firebase configuration
+          VITE_FIREBASE_API_KEY: ci-dummy-api-key
+          VITE_FIREBASE_AUTH_DOMAIN: ci-dummy.firebaseapp.com
+          VITE_FIREBASE_PROJECT_ID: ci-dummy
+          VITE_FIREBASE_STORAGE_BUCKET: ci-dummy.firebasestorage.googleapis.com
+          VITE_FIREBASE_MESSAGING_SENDER_ID: "123456789"
+          VITE_FIREBASE_APP_ID: "1:123456789:web:ci-dummy"
+
+  backend:
+    name: Backend / Tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    defaults:
+      run:
+        working-directory: apps/backend
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: apps/backend/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run ESLint
+        run: npm run lint
+
+      - name: Run Jest
+        run: npm test -- --runInBand
+        env:
+          NODE_ENV: test
+
+          API_NAME: reviewlens-api
+          API_HOST: localhost
+          API_PORT: 8000
+
+          # Dummy Firebase Admin SDK service account
+          SERVICE_TYPE: service_account
+          SERVICE_PROJECT_ID: ci-dummy
+          SERVICE_PRIVATE_KEY_ID: ci-dummy-key-id
+          SERVICE_PRIVATE_KEY: "-----BEGIN PRIVATE KEY-----\nCI_DUMMY_PRIVATE_KEY\n-----END PRIVATE KEY-----\n"
+          SERVICE_CLIENT_EMAIL: ci-dummy@ci-dummy.iam.gserviceaccount.com
+          SERVICE_CLIENT_ID: "123456789"
+          SERVICE_AUTH_URI: https://accounts.google.com/o/oauth2/auth
+          SERVICE_TOKEN_URI: https://oauth2.googleapis.com/token
+          SERVICE_AUTH_PROVIDER_CERT: https://www.googleapis.com/oauth2/v1/certs
+          SERVICE_CLIENT_CERT: https://www.googleapis.com/robot/v1/metadata/x509/ci-dummy
+          SERVICE_UNIVERSE_DOMAIN: googleapis.com
