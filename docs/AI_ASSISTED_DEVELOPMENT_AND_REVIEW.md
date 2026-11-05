@@ -15,6 +15,7 @@
 | ----- | ----- |
 | Claude ([claude.ai](http://claude.ai) and Claude Code) | Planning, writing features and tests, explaining code, reviewing diffs |
 | GitHub Copilot (optional) | Inline autocomplete in VS Code |
+| OpenAI Codex (CLI and VS Code extension) | Writing features and tests, refactoring, explaining code, reviewing diffs |
 
    2. AI-02:  
       1. Only the tools above are used for project code. Adding another tool should be mentioned at stand-up and then added to this table.  
