@@ -1,4 +1,3 @@
-
 # ReviewLens AI Frontend
 
 Welcome to the ReviewLens AI frontend repository! This project is built using **React**, **JavaScript**, and **Vite**.
@@ -17,14 +16,14 @@ This documentation provides instructions for setting up the development environm
 
 ## Tech Stack
 
-| Technology | Description |
-|---|---|
-| React | Frontend UI library |
-| JavaScript (ES6+) | Application programming language |
-| Vite | Frontend build tool and development server |
-| HTML5 | Application markup |
-| CSS3 | Styling |
-| npm | Package manager |
+| Technology        | Description                                |
+| ----------------- | ------------------------------------------ |
+| React             | Frontend UI library                        |
+| JavaScript (ES6+) | Application programming language           |
+| Vite              | Frontend build tool and development server |
+| HTML5             | Application markup                         |
+| CSS3              | Styling                                    |
+| npm               | Package manager                            |
 
 ## Prerequisites
 
@@ -80,6 +79,7 @@ VITE_API_BASE_URL=http://localhost:8000/api
 ```
 
 **Important:**
+
 - All environment variables exposed to frontend code must start with `VITE_`.
 - Access variables using `import.meta.env`.
 - Never store sensitive credentials, private API keys, or secrets in frontend environment variables.
@@ -108,14 +108,14 @@ Open the URL in your browser to access the application.
 
 ## Available Scripts
 
-| Command | Description |
-|---|---|
-| `npm install` | Install project dependencies |
-| `npm run dev` | Start the local development server |
-| `npm run build` | Build the application for production |
+| Command           | Description                          |
+| ----------------- | ------------------------------------ |
+| `npm install`     | Install project dependencies         |
+| `npm run dev`     | Start the local development server   |
+| `npm run build`   | Build the application for production |
 | `npm run preview` | Preview the production build locally |
-| `npm run lint` | Run code linting (if configured) |
-| `npm run test` | Run tests |
+| `npm run lint`    | Run code linting (if configured)     |
+| `npm run test`    | Run tests                            |
 
 Run a script using:
 
