@@ -13,18 +13,18 @@ export function getFirebaseAdminApp() {
         return getApp();
     }
 
-    const { SERVICE_PROJECT_ID, SERVICE_CLIENT_EMAIL, SERVICE_PRIVATE_KEY } =
-        process.env;
-
-    if (!SERVICE_PROJECT_ID || !SERVICE_CLIENT_EMAIL || !SERVICE_PRIVATE_KEY) {
+    if (!process.env.SERVICE_ACCOUNT) {
         throw new Error('Missing Firebase Admin configuration.');
     }
 
+    let serviceAccount;
+    try {
+        serviceAccount = JSON.parse(process.env.SERVICE_ACCOUNT);
+    } catch {
+        throw new Error('Invalid Firebase Admin configuration.');
+    }
+
     return initializeApp({
-        credential: cert({
-            projectId: SERVICE_PROJECT_ID,
-            clientEmail: SERVICE_CLIENT_EMAIL,
-            privateKey: SERVICE_PRIVATE_KEY.replace(/\\n/g, '\n'),
-        }),
+        credential: cert(serviceAccount),
     });
 }
