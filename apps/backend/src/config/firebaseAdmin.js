@@ -1,6 +1,7 @@
 import { existsSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { cert, getApp, getApps, initializeApp } from 'firebase-admin/app';
+import { getFirestore } from 'firebase-admin/firestore';
 
 const localEnvPath = fileURLToPath(new URL('../../.env', import.meta.url));
 
@@ -27,4 +28,8 @@ export function getFirebaseAdminApp() {
     return initializeApp({
         credential: cert(serviceAccount),
     });
+}
+
+export function getDb() {
+    return getFirestore(getFirebaseAdminApp());
 }

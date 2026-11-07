@@ -1,12 +1,7 @@
-import { getFirestore } from 'firebase-admin/firestore';
-import { getFirebaseAdminApp } from '../config/firebaseAdmin.js';
+import { getDb } from '../config/firebaseAdmin.js';
 import { AppError } from '../utils/AppError.js';
 
-export async function getOwnedProduct(
-    uid,
-    productId,
-    db = getFirestore(getFirebaseAdminApp())
-) {
+export async function getOwnedProduct(uid, productId, db = getDb()) {
     if (typeof uid !== 'string' || !uid.trim()) {
         throw new AppError(401, 'UNAUTHENTICATED', 'Authentication required.');
     }
