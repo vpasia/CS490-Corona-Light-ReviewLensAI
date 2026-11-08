@@ -33,3 +33,7 @@ export function getFirebaseAdminApp() {
 export function getDb() {
     return getFirestore(getFirebaseAdminApp());
 }
+
+export function getAuth() {
+    return getAuth(getFirebaseAdminApp());
+}

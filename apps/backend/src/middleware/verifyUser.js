@@ -1,4 +1,4 @@
-import { auth } from '../services/firebase.js';
+import { getAuth } from '../config/firebaseAdmin.js';
 import { createErrorPayload } from '../utils/utils.js';
 
 export async function verifyUserToken(req, res, next) {
@@ -11,7 +11,7 @@ export async function verifyUserToken(req, res, next) {
     const token = authHeader.split("Bearer ")[1];
 
     try {
-        const decodedToken = await auth.verifyIdToken(token);
+        const decodedToken = await getAuth().verifyIdToken(token);
         req.user = decodedToken;
         next();
     } catch (error) {
