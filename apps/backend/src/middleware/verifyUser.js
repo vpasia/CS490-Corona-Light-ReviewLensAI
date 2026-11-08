@@ -1,40 +1,31 @@
 import { getFirebaseAuth } from '../config/firebaseAdmin.js';
-import { createErrorPayload } from '../utils/utils.js';
+import { AppError } from '../utils/AppError.js';
 
-export async function verifyUserToken(req, res, next) {
+export async function verifyUserToken(req, _res, next) {
     const authHeader = req.headers.authorization;
 
     if (!authHeader || !authHeader.startsWith('Bearer ')) {
-        return res
-            .status(401)
-            .json(createErrorPayload('UNAUTHENTICATED', 'Missing Token.'));
+        return next(new AppError(401, 'UNAUTHENTICATED', 'Missing Token.'));
     }
 
     const token = authHeader.split('Bearer ')[1];
     const auth = getFirebaseAuth();
 
+    let decodedToken;
     try {
-        const decodedToken = await auth.verifyIdToken(token);
-        if (typeof decodedToken?.uid !== 'string' || !decodedToken.uid.trim()) {
-            return res
-                .status(401)
-                .json(
-                    createErrorPayload(
-                        'UNAUTHENTICATED',
-                        'Authentication required.'
-                    )
-                );
-        }
-        req.user = decodedToken;
-        next();
+        decodedToken = await auth.verifyIdToken(token);
     } catch {
-        return res
-            .status(401)
-            .json(
-                createErrorPayload(
-                    'UNAUTHENTICATED',
-                    'Invalid or expired token.'
-                )
-            );
+        return next(
+            new AppError(401, 'UNAUTHENTICATED', 'Invalid or expired token.')
+        );
     }
+
+    if (typeof decodedToken?.uid !== 'string' || !decodedToken.uid.trim()) {
+        return next(
+            new AppError(401, 'UNAUTHENTICATED', 'Authentication required.')
+        );
+    }
+
+    req.user = decodedToken;
+    next();
 }
