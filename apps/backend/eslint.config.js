@@ -14,7 +14,7 @@ export default [
 			},
 		},
 		rules: {
-			"no-console": "warn",
+			"no-console": ["warn", { allow: ["info", "warn", "error"] }],
 		},
 	},
 	{

@@ -1,7 +1,13 @@
-import { expect, test } from '@jest/globals';
+import { expect, test, jest } from '@jest/globals';
 import { FieldValue } from 'firebase-admin/firestore';
-import { createProduct } from '../../src/services/productService.js';
-import { getOwnedProduct } from '../../src/services/ownership.js';
+
+jest.unstable_mockModule('../../src/config/firebaseAdmin.js', () => ({
+    getDb: jest.fn(),
+}));
+
+const { createProduct } = await import('../../src/services/productService.js');
+
+const { getOwnedProduct } = await import('../../src/services/ownership.js');
 
 function fakeFirestore() {
     const documents = new Map();
