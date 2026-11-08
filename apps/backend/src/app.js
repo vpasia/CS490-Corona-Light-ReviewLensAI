@@ -1,6 +1,6 @@
 import express from 'express';
-import { createErrorPayload } from './utils/utils';
-import { verifyUserToken } from './middleware/verifyUser';
+import { createErrorPayload } from './utils/utils.js';
+import { verifyUserToken } from './middleware/verifyUser.js';
 
 const app = express();
 
