@@ -15,6 +15,7 @@ export async function verifyUserToken(req, res, next) {
         req.user = decodedToken;
         next();
     } catch (error) {
+        console.error(error);
         res.status(401).json(createErrorPayload("UNAUTHORIZED", "Invalid or expired token."));
     }
 }
