@@ -1,41 +1,81 @@
-# S1-020: Canopy review extraction
+# S1-020: Canopy Review Extraction
 
 ## Implemented scope
 
-`apps/backend/src/services/canopyService.js` retrieves US Amazon top reviews using Canopy's REST API. It identifies individual review records and maps body/rating to text/rating for the S1-021 normalizer. The selected approach is an external API, not scraping or hard-coded fallback reviews.
+`apps/backend/src/services/canopyService.js` retrieves US Amazon top reviews using Canopy's REST API. It identifies individual review records and maps them into the input format expected by the S1-021 normalizer.
 
-Official sources checked November 8, 2026:
+The selected ingestion approach is an external API. The service does not substitute hard-coded sample reviews when retrieval fails.
+
+Official references:
 - https://www.canopyapi.co/amazon-reviews-api
 - https://docs.canopyapi.co/
 
-Endpoint: GET https://rest.canopyapi.co/api/amazon/product/top-reviews
-Query: asin extracted from an HTTPS amazon.com product URL, domain=US.
-Headers: API-KEY and AMAZON_COOKIE. Current Canopy documentation requires a signed-in Amazon session cookie for US reviews. Treat both as server secrets. Do not commit them, send them from frontend, or include them in logs.
+Endpoint:
+GET https://rest.canopyapi.co/api/amazon/product/top-reviews
 
-This endpoint returns representative top reviews, not every product review. Pagination and other Amazon domains are outside this implementation. Empty upstream collections remain empty; downstream must not claim a successful populated import based only on HTTP success.
+Query parameters:
+- asin: extracted from a supported HTTPS Amazon.com product URL.
+- domain: US.
+
+Request headers:
+- API-KEY
+- AMAZON_COOKIE
+
+Canopy's documentation requires a signed-in Amazon.com session cookie for US top reviews. Both credentials must remain on the backend and must never be committed, logged, or sent from the frontend.
+
+This endpoint returns representative top reviews. Retrieving all reviews, pagination, and other Amazon marketplaces are outside this implementation.
+
+An empty provider collection remains empty. An HTTP success alone does not establish that a populated import succeeded.
 
 ## Configuration
 
-The service reads CANOPY_API_KEY and CANOPY_AMAZON_COOKIE from process.env at call time. The backend bootstrap must load its server environment before invoking it; this service does not load .env itself. Match existing team configuration or explicitly inject the apiKey/amazonCookie options. Do not overwrite the team's .env.example: add empty placeholders only if missing.
+The service reads these environment variables at call time:
 
+```dotenv
 CANOPY_API_KEY=
 CANOPY_AMAZON_COOKIE=
+```
 
-Never ask users to paste session cookies into the application. A teammate administering the server must provision the provider credentials through the team's private channel.
+For local development, configure them privately in `apps/backend/.env`. The backend bootstrap or manual command must load that file before calling the service. The service does not load `.env` itself.
 
-## Integration contract
+Options also allow credentials to be supplied explicitly for testing.
+
+Only empty placeholders belong in `.env.example`. Never commit actual credentials.
+
+An Amazon session cookie represents a signed-in session. Provision it privately on the backend; application users should not be asked to submit cookies through the UI.
+
+## Service contract
 
 Exports:
-- parseAmazonSource(sourceUrl): validates supported URL and returns { asin, domain }.
-- mapCanopyReviews(payload): independently testable provider response mapping.
-- fetchCanopyReviews(sourceUrl, options?): retrieves and maps reviews asynchronously.
 
-Documented response path: data.amazonProduct.topReviews.
-Mapping: body -> text, rating -> rating, id -> sourceReviewId, title -> title,
-reviewer.name -> reviewerName, verifiedPurchase -> isVerifiedPurchase.
-No source-supplied ownership fields are forwarded. Malformed individual records are retained as null for #21 to reject; a malformed collection throws instead of pretending to be empty success.
+- `parseAmazonSource(sourceUrl)`: validates a supported URL and returns `{ asin, domain }`.
+- `mapCanopyReviews(payload)`: maps provider-specific fields independently of network access.
+- `fetchCanopyReviews(sourceUrl, options?)`: retrieves and maps reviews asynchronously.
 
-Intended controller/orchestrator usage AFTER authentication and target ownership verification:
+The expected provider response collection is:
+
+```text
+data.amazonProduct.topReviews
+```
+
+Field mapping:
+
+| Canopy field | Normalizer input field |
+| --- | --- |
+| body | text |
+| rating | rating |
+| id | sourceReviewId |
+| title | title |
+| reviewer.name | reviewerName |
+| verifiedPurchase | isVerifiedPurchase |
+
+The adapter does not forward source-supplied ownership fields.
+
+Malformed individual records are represented as `null` so the normalizer can reject them. Missing or malformed review collections cause an error instead of being treated as an empty successful response.
+
+## Connection to S1-021
+
+After authentication and target ownership verification, an orchestration service can retrieve and normalize reviews:
 
 ```js
 import { fetchCanopyReviews } from './services/canopyService.js';
@@ -45,22 +85,122 @@ const mappedReviews = await fetchCanopyReviews(ownedProduct.amazonUrl);
 const { reviews, rejected } = normalizeReviews(mappedReviews);
 ```
 
-Adjust relative imports to caller location. This is a contract example, not a new route. Vincent's controller should resolve the owned target/product according to the team's accepted schema. Persist accepted reviews through #22 and record final state through #23. Do not trust a client userId or mark success before persistence completes.
+Adjust relative import paths for the calling file.
 
-Errors expose code, status, and a sanitized message. They do not expose provider bodies, URLs with secrets, or underlying network errors. Current errors are plain Error instances carrying those properties; align with the team's AppError/error middleware when wiring routes. HTTP-facing status defaults to 502 for provider failures, 503 for missing configuration, and 400 for unsupported URLs. Provider 429 has code PROVIDER_RATE_LIMITED. There are no automatic retries; one invocation uses at most one provider request, with a 15-second timeout including body decoding. Redirects are disallowed.
+This example demonstrates service composition. The authenticated application route and controller are separate integration work.
 
-## Validation and remaining work
+The normalizer returns an internal `{ reviews, rejected }` result. That internal object is not the public API response contract.
 
-11 Jest tests passed in the assistant environment with Node's experimental VM module flag. ESLint recommended rules, Node globals and no-console warning passed on both new files. Prettier applied using the repository's formatting configuration. A separate offline compatibility check passed against the existing #21 normalizer. These are local checks, not GitHub CI results or a live Canopy validation.
+The stored-review list endpoint must follow the engineering standards:
 
-Tests cover URL parsing, invalid source rejection before requests, documented field mapping, malformed records/collections, empty results, request destination/credentials, missing credentials, HTTP errors, network/JSON errors and timeouts. Fixtures are synthetic examples of the documented shape, not captured real reviews.
+```json
+{
+  "data": [],
+  "nextCursor": null,
+  "count": 0
+}
+```
 
-From apps/backend after copying files:
+The final import endpoint response must be agreed with the controller implementation.
+
+Accepted reviews must be persisted through S1-022. Final ingestion results must be recorded and reported through S1-023.
+
+User identity must come from verified authentication. A client-supplied userId must never establish ownership.
+
+## Timeouts and errors
+
+The default timeout is 60 seconds, including response body decoding. Tests and callers can override it with `timeoutMs`, which accepts integer values from 1 through 60000 milliseconds.
+
+There are no automatic retries. Each invocation makes at most one provider request. Redirects are disallowed.
+
+Errors expose a code, status, and sanitized message. They do not expose credentials, provider response bodies, or underlying network error details.
+
+Current error codes include:
+
+- INVALID_AMAZON_URL
+- INGESTION_NOT_CONFIGURED
+- PROVIDER_TIMEOUT
+- PROVIDER_UNAVAILABLE
+- PROVIDER_RATE_LIMITED
+- PROVIDER_AUTH_FAILED
+- UPSTREAM_PROVIDER_ERROR
+- INVALID_PROVIDER_RESPONSE
+
+Status defaults:
+- 400 for unsupported Amazon URLs.
+- 503 for missing provider configuration.
+- 502 for provider failures.
+
+The current implementation uses plain Error instances with code and status properties. Before application integration, align these with the team's AppError class and standard error middleware.
+
+## Automated validation
+
+After updating the branch with the team's product services and authentication middleware, the following checks passed locally:
 
 ```powershell
 npm test -- --runInBand
 npm run lint
-npx prettier --check src/services/canopyService.js tests/services/canopyService.test.js
 ```
 
-Remaining before claiming complete end-to-end ingestion: verify one authorized live import with privately configured credentials, connect to #21 and approved routes/ownership checks, persistence #22 and result state #23. No live requests were made during development. Re-run the team's full suite/CI after installing these files.
+Results:
+- 4 test suites passed.
+- 36 tests passed.
+- Backend lint passed.
+
+The 36 tests comprise:
+- 11 Canopy service tests.
+- 10 review normalization tests.
+- 15 existing product service and authentication middleware tests.
+
+Canopy tests use deterministic mocks and synthetic fixtures based on the documented provider response shape. Automated tests make no live Canopy requests.
+
+Coverage includes:
+- Supported and unsupported source URLs.
+- Field mapping.
+- Malformed records and collections.
+- Empty review collections.
+- Provider destination and credential headers.
+- Missing credentials.
+- HTTP errors.
+- Network failures.
+- Invalid JSON.
+- Request timeouts.
+
+The Canopy files were previously formatted using the repository's Prettier configuration.
+
+These are local validation results. They do not establish the current GitHub CI status.
+
+## Live verification — November 8, 2026
+
+Manually tested real Canopy retrieval followed by S1-021 normalization for:
+
+```text
+https://www.amazon.com/dp/B07PRVS98X
+```
+
+The first attempt exceeded the original 15-second timeout.
+
+A subsequent request with a 60-second timeout completed with:
+
+| Result | Count |
+| --- | --- |
+| Received | 13 |
+| Accepted | 13 |
+| Rejected | 0 |
+
+The service's default timeout was then changed to 60 seconds. All 36 backend tests and backend lint passed after that change.
+
+The successful manual command loaded credentials from the local `.env`, called `fetchCanopyReviews`, and passed its returned records to `normalizeReviews`.
+
+Only counts and a completion message were displayed. Credentials and full review text were not printed.
+
+This verifies real retrieval and normalization for one product. It does not verify Firestore persistence, authenticated HTTP routes, frontend integration, or final ingestion status reporting.
+
+## Remaining work
+
+- Align service errors with the team's AppError and error-handling conventions.
+- Implement review persistence with ownership checks through S1-022.
+- Implement ingestion coordination and result tracking through S1-019 and S1-023.
+- Connect services to authenticated controllers and routes.
+- Verify cross-user isolation before provider calls and database writes.
+- Verify the completed application flow and GitHub CI before merging.

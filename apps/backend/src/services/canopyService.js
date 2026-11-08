@@ -75,7 +75,7 @@ export async function fetchCanopyReviews(
         apiKey = process.env.CANOPY_API_KEY,
         amazonCookie = process.env.CANOPY_AMAZON_COOKIE,
         fetchImpl = globalThis.fetch,
-        timeoutMs = 15000,
+        timeoutMs = 60000,
     } = {}
 ) {
     const { asin, domain } = parseAmazonSource(sourceUrl);
