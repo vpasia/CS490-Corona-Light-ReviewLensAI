@@ -37,7 +37,7 @@ describe("verifyUserToken middleware", () => {
             error: {
                 code: "UNAUTHORIZED",
                 message: "Missing Token.",
-                details: "",
+                details: []
             },
         });
 
@@ -53,7 +53,7 @@ describe("verifyUserToken middleware", () => {
             error: {
                 code: "UNAUTHORIZED",
                 message: "Missing Token.",
-                details: ""
+                details: [] 
             }
         });
 
@@ -71,7 +71,7 @@ describe("verifyUserToken middleware", () => {
             error: {
                 code: "UNAUTHORIZED",
                 message: "Invalid or expired token.",
-                details: ""
+                details: []
             }
         });
 

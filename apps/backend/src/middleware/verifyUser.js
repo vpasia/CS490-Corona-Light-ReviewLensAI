@@ -14,8 +14,7 @@ export async function verifyUserToken(req, res, next) {
         const decodedToken = await getFirebaseAuth().verifyIdToken(token);
         req.user = decodedToken;
         next();
-    } catch (error) {
-        console.error(error);
+    } catch {
         res.status(401).json(createErrorPayload("UNAUTHORIZED", "Invalid or expired token."));
     }
 }
