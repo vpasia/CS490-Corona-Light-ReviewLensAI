@@ -35,7 +35,7 @@ describe("verifyUserToken middleware", () => {
 
         expect(response.body).toEqual({
             error: {
-                code: "UNAUTHORIZED",
+                code: "UNAUTHENTICATED",
                 message: "Missing Token.",
                 details: []
             },
@@ -51,7 +51,7 @@ describe("verifyUserToken middleware", () => {
 
         expect(response.body).toEqual({
             error: {
-                code: "UNAUTHORIZED",
+                code: "UNAUTHENTICATED",
                 message: "Missing Token.",
                 details: [] 
             }
@@ -69,7 +69,7 @@ describe("verifyUserToken middleware", () => {
 
         expect(response.body).toEqual({
             error: {
-                code: "UNAUTHORIZED",
+                code: "UNAUTHENTICATED",
                 message: "Invalid or expired token.",
                 details: []
             }
