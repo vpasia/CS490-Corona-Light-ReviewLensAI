@@ -1,15 +1,6 @@
-import { existsSync } from 'node:fs';
-import { fileURLToPath } from 'node:url';
-
-const localEnvPath = fileURLToPath(new URL('../../.env', import.meta.url));
-
-if (existsSync(localEnvPath)) {
-    process.loadEnvFile(localEnvPath);
-}
-
 import app from './app.js';
 
-
-app.listen(process.env.API_PORT, () => {
-    console.info(`Server is running on port: ${process.env.API_PORT}`);
+const port = process.env.API_PORT || 8000;
+app.listen(port, () => {
+    console.info(`Server is running on port: ${port}`);
 });
