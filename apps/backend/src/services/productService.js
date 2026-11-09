@@ -1,6 +1,7 @@
 import { FieldValue } from 'firebase-admin/firestore';
 import { getDb } from '../config/firebaseAdmin.js';
 import { AppError } from '../utils/AppError.js';
+import { getOwnedProduct } from './ownership.js';
 
 export async function createProduct(uid, input, db = getDb()) {
     if (typeof uid !== 'string' || !uid.trim()) {
@@ -26,4 +27,30 @@ export async function createProduct(uid, input, db = getDb()) {
         createdAt: FieldValue.serverTimestamp(),
     });
     return productRef.id;
+}
+
+export async function deleteProduct(uid, productId, db = getDb()) {
+    await getOwnedProduct(uid, productId, db);
+
+    const references = [];
+    for (const collectionName of ['reviews', 'analyses']) {
+        const children = await db
+            .collection(collectionName)
+            .where('userId', '==', uid)
+            .where('productId', '==', productId)
+            .get();
+        for (const child of children.docs) {
+            references.push(child.ref);
+        }
+    }
+
+    references.push(db.collection('products').doc(productId));
+    for (let index = 0; index < references.length; index += 400) {
+        const batch = db.batch();
+        for (const ref of references.slice(index, index + 400)) {
+            batch.delete(ref);
+        }
+        await batch.commit();
+    }
+    return productId;
 }
