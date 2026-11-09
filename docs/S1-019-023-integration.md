@@ -1,29 +1,119 @@
-# S1-019 / S1-023: Review ingestion coordination and result state
+# S1-019 / S1-023: Ingestion Coordination and Result State
 
-## Implementation
+## Implemented scope
 
-`ingestionService.js` coordinates an owned product import and persists its result in `ingestionRuns`. It reuses Canopy retrieval, normalization, ownership and the shared review-write helper.
+ingestionService.js coordinates review imports for user-owned products
+and records their results in the ingestionRuns collection.
 
-The service starts a run as `processing`, then fetches outside any database transaction. It commits accepted review writes, the `succeeded` run status and lock release in ONE Firestore transaction. A failed final transaction cannot leave a successful run without its reviews. Failure records contain safe error information and savedCount 0; existing reviews are not deleted or replaced.
+The service performs:
 
-The existing reviewService now uses reviewWrites.js for shared validation and write staging. Existing public signatures and the 400-review save limit are retained. Canopy errors are now AppError instances so central error middleware recognizes them; provider-specific codes remain useful for direct callers and are mapped to standard UPSTREAM_PROVIDER_ERROR by the coordinator.
+1. Identity and product identifier validation.
+2. Product ownership verification.
+3. Validation of the product's saved Amazon URL.
+4. Creation of a processing run and an import lock.
+5. Review retrieval through Canopy.
+6. Review normalization.
+7. Atomic persistence of accepted reviews and the successful run state.
+8. Safe failure recording when an import cannot complete.
 
-## Public service functions
+The provider request occurs outside Firestore transactions because
+Firestore can retry transaction callbacks.
+
+## Related service changes
+
+reviewWrites.js contains shared review validation and write-staging
+logic used by reviewService.js and ingestionService.js.
+
+The existing reviewService public functions remain available:
+- saveReviews
+- getReviews
+
+The 400-review save limit is retained.
+
+Canopy errors now use the team's AppError class. Provider-specific
+codes remain available to direct callers. The ingestion coordinator
+maps provider failures to the standard UPSTREAM_PROVIDER_ERROR code.
+
+No new dependencies or environment variables are introduced.
+
+## Public service interface
 
 ```js
-import { importReviews, getIngestionRun, getIngestionRuns } from './services/ingestionService.js';
+import {
+    importReviews,
+    getIngestionRun,
+    getIngestionRuns
+} from './services/ingestionService.js';
 
-// Controller must pass verified req.user.uid, never a submitted userId.
 const result = await importReviews(uid, productId);
-const run = await getIngestionRun(uid, productId, result.ingestionRunId);
+
+const run = await getIngestionRun(
+    uid,
+    productId,
+    result.ingestionRunId
+);
+
 const runs = await getIngestionRuns(uid, productId);
 ```
 
-`importReviews` options support `{ db, fetchReviews }` for isolated tests. Controllers should use default dependencies, not accept these options from requests. UID is supplied by the caller after authentication; these service functions do not verify an HTTP token themselves.
+Adjust relative imports for the caller's location.
 
-The request must reference an existing product. The source is the saved product.amazonUrl; callers cannot inject a different import URL. Unsupported/missing sources and missing/foreign targets are rejected before provider processing. Failed admission/validation does not create a run.
+Controllers must supply uid from verified req.user.uid. A userId from
+the request body must never establish ownership.
 
-Example successful INTERNAL service result:
+These service functions do not verify HTTP tokens themselves.
+
+importReviews accepts optional db and fetchReviews dependencies for
+isolated tests. Controllers must not accept these dependency options
+from client requests.
+
+The source URL comes from the owned product's amazonUrl field.
+The import request cannot override it with another URL.
+
+## Admission checks
+
+Before a provider request begins, the service checks:
+
+- A usable user ID is supplied.
+- The product identifier is valid.
+- The product exists.
+- The user owns the product.
+- The saved Amazon URL is supported.
+- Another active import does not hold the product's lock.
+
+Missing or foreign products return 404 PRODUCT_NOT_FOUND.
+
+An overlapping import returns 409 INGESTION_IN_PROGRESS before
+another provider request is made.
+
+Rejected admission or source validation does not create an ingestion
+run.
+
+## Stored ingestion state
+
+Each ingestionRuns document includes:
+
+- ingestionRunId
+- userId
+- productId
+- status
+- receivedCount
+- acceptedCount
+- rejectedCount
+- savedCount
+- startedAt
+- completedAt
+- error
+
+Supported stored statuses:
+
+| Status | Meaning |
+| --- | --- |
+| processing | Import started and has not recorded a final result |
+| succeeded | Accepted reviews and successful status were committed |
+| failed | The attempt recorded a failure |
+
+Example successful internal service result:
 
 ```json
 {
@@ -38,43 +128,224 @@ Example successful INTERNAL service result:
 }
 ```
 
-Each stored run additionally has userId, startedAt and completedAt Firestore timestamps. Empty/all-invalid results become failed runs with NO_VALID_REVIEWS. Mixed results succeed when valid reviews are actually saved, with rejectedCount retained. More than 400 accepted reviews fail without partial writes.
+Stored runs additionally contain ownership and Firestore timestamps.
 
-## Controllers / frontend handoff
+Empty results and entirely invalid review collections become failed
+runs with NO_VALID_REVIEWS.
 
-The documented import action is POST /api/products/:productId/import-reviews. This implementation waits for completion, returning a result or throwing AppError; it is not a detached background job. The controller should wrap success as `{ data: result }` with HTTP 200 and allow errors to reach the shared middleware. Importing reviews here is an action on an existing product, unlike product creation's HTTP 201.
+Mixed valid and invalid collections can succeed when accepted reviews
+are actually saved. rejectedCount preserves the rejected total.
 
-Proposed status routes for team confirmation (NOT implemented by this package):
-- GET /api/products/:productId/ingestion-runs -> getIngestionRuns
-- GET /api/products/:productId/ingestion-runs/:ingestionRunId -> getIngestionRun
+More than 400 accepted reviews fail without partial persistence.
 
-Controllers must serialize timestamps and use the standard data envelope. The run-list service returns all matching runs, unsorted and without cursor pagination; do not invent count/cursor behavior in the frontend. UI should handle no runs as not yet imported. It can show a local loading state during POST, then success/error and refreshed reviews. A failed POST must not be automatically retried: reread stored status first if the outcome is uncertain.
+## Atomic persistence
 
-No routes/controllers or frontend changes are included. Vincent/team owns route integration. Request/proxy timeouts must allow the 60-second Canopy timeout plus database work.
+The final Firestore transaction:
+
+1. Rechecks product ownership.
+2. Confirms the run is still active.
+3. Stages accepted review documents.
+4. Updates the run to succeeded.
+5. Records completion time.
+6. Releases the product's import lock.
+
+These writes commit together. The transaction cannot record success
+without committing the associated review writes.
+
+Existing valid reviews are not deleted or replaced on failure.
+
+Successful repeated imports currently create additional review
+documents. Duplicate suppression remains deferred under S1-022.
+
+## Failure handling
+
+Stored and user-visible failure information uses safe codes and
+messages. Raw provider errors, credentials, and review text are not
+included.
+
+Provider failures become 502 UPSTREAM_PROVIDER_ERROR.
+
+Other handled outcomes include:
+- NO_VALID_REVIEWS
+- VALIDATION_ERROR
+- PRODUCT_NOT_FOUND
+- INGESTION_SUPERSEDED
+
+Unexpected errors become INTERNAL_ERROR with a generic message.
+
+If recording the final failure state is unavailable, the service
+throws 500 INGESTION_STATE_UNAVAILABLE. The caller should check the
+stored run state before retrying.
+
+If the successful transaction committed but its acknowledgement was
+lost, recovery recognizes the persisted succeeded state rather than
+overwriting it as failed.
+
+Logs contain an event name, identifiers, and safe codes. They use the
+existing allowed console.error path. Adoption of a centralized logger
+remains integration work.
 
 ## Concurrent imports and recovery
 
-A transaction checks product ownership, validates its source, creates a processing run and sets product.activeIngestionRunId with ingestionLockUntil (server-process Unix milliseconds). Concurrent admission within a 5-minute lease returns 409 INGESTION_IN_PROGRESS before another provider call. Ownership and the active run are rechecked at the final transaction.
+Admission uses a transaction to create the processing run and set:
 
-If a process dies, its run can remain processing. Once the lease expires, the NEXT import marks that previous run failed with INGESTION_INTERRUPTED and starts a new run. No timer/background recovery worker is implemented; the status does not change automatically at five minutes. A superseded old request cannot persist reviews or clear a newer run's lock.
+- product.activeIngestionRunId
+- product.ingestionLockUntil
 
-If failure-status persistence is unavailable, callers receive 500 INGESTION_STATE_UNAVAILABLE and should check stored status before retrying. If a success committed but its acknowledgement was lost, recovery recognizes the persisted success. Logs contain event, identifiers and safe codes, never raw error messages, credentials or review text. They use the existing allowed console.error path; adopt the team's centralized logger when available.
+The lock has a five-minute lease based on server-process Unix time.
 
-Run lookup checks product ownership and run ownership/product association. Lists filter by BOTH userId and productId. Separate users' records are never shared. Successful repeat imports still create new review IDs, following #22's existing duplicate behavior.
+If a process stops unexpectedly, its run may remain processing.
+After the lease expires, the next import attempt marks the previous
+processing run failed with INGESTION_INTERRUPTED and starts a new run.
 
-## Validation
+There is no background recovery worker. Expired runs do not change
+status automatically after five minutes.
 
-21 new Jest tests passed locally in the assistant environment. With existing Canopy (11) and review persistence (20) tests, 52 focused tests passed. New/changed JS files passed Node/recommended ESLint rules with the team's console allowances and were formatted using committed backend Prettier settings.
+An old, superseded request cannot save reviews or release a newer
+run's lock.
 
-Coverage includes source validation, processing/success/failure, same-owner target isolation, foreign/missing targets before provider access, missing identity, mixed/empty/invalid review collections, safe provider failures, transaction rollback, lost acknowledgement, failed status persistence, overlapping requests, expired-run recovery, ownership recheck and batch size rejection.
+## Ownership of status reads
 
-Tests mock Firebase initialization/timestamps and use a transactional fake database. No real Firebase/Canopy calls, CI run or GitHub mutations were performed to validate this package. The previously reported live #20-22 test predates this coordinator and does NOT verify it.
+getIngestionRun verifies:
+- The caller owns the product.
+- The run belongs to that user.
+- The run belongs to the requested product.
 
-After installation, run from apps/backend:
+Missing or mismatched runs return 404 INGESTION_NOT_FOUND after the
+product ownership check.
+
+getIngestionRuns checks product ownership and filters by both userId
+and productId.
+
+The list currently returns all matching runs without guaranteed order
+or cursor pagination.
+
+## Controller and frontend handoff
+
+The documented import action is:
+
+POST /api/products/:productId/import-reviews
+
+The coordinator waits for completion and returns a result or throws
+AppError. It is not a detached background worker.
+
+The controller should:
+- Pass verified req.user.uid and productId.
+- Call importReviews.
+- Return HTTP 200 with { data: result } on success.
+- Forward errors to the central error middleware.
+
+The import action operates on an existing product. Product creation
+continues to use HTTP 201 separately.
+
+Proposed status routes for team confirmation:
+
+- GET /api/products/:productId/ingestion-runs
+- GET /api/products/:productId/ingestion-runs/:ingestionRunId
+
+These status routes are proposals; this package does not implement
+HTTP routes or controllers.
+
+Controllers must serialize timestamps and use standard response
+envelopes. Pagination behavior must be agreed before exposing cursors.
+
+The frontend can show:
+- Not imported when no runs exist.
+- Loading while the import POST is pending.
+- Success after a successful result.
+- A safe error after failure.
+
+On completion, the frontend should refresh stored reviews and status.
+
+Request and proxy timeouts must allow the 60-second Canopy timeout
+plus database work.
+
+Do not automatically repeat a failed or timed-out import request.
+Check its stored outcome first.
+
+## Automated verification
+
+The complete backend suite passed locally:
 
 ```powershell
 npm test -- --runInBand
 npm run lint
 ```
 
-With the previously reported 56-test baseline, expect 77 total unless team changes add more tests. Confirm the actual output. Follow with a controlled live test of importReviews and stored run retrieval, then authenticated route/UI integration testing and CI. Keep .env private.
+Results:
+- 6 test suites passed.
+- 77 tests passed.
+- Backend lint passed.
+
+The suite includes 21 new ingestion tests.
+
+Coverage includes:
+- Processing and successful completion.
+- Source and identity validation.
+- Foreign or missing products before provider access.
+- Normalization of mixed review collections.
+- Empty and entirely invalid collections.
+- Sanitized provider failures.
+- Atomic write rollback.
+- Recovery after a lost success acknowledgement.
+- Failure-state persistence errors.
+- Blocking overlapping imports.
+- Recovery of expired runs on a later request.
+- Ownership rechecks before persistence.
+- Rejection of oversized imports.
+- Run isolation between users and products.
+
+Automated tests use mocked Firebase configuration and timestamps,
+transactional fake database behavior, and simulated provider results.
+They make no live Canopy or Firebase requests.
+
+Changed JavaScript files were formatted using the repository's
+backend Prettier settings.
+
+Local results do not establish the current GitHub CI status.
+
+## Live coordinator verification — November 8, 2026
+
+Called importReviews using real Canopy and Firestore, then retrieved
+the stored ingestion run and newly added review documents.
+
+The check verified the Firebase user exists before calling the
+service. This is separate from HTTP token authentication.
+
+Results:
+
+| Stage | Count |
+| --- | --- |
+| Received | 13 |
+| Accepted | 13 |
+| Rejected | 0 |
+| Saved | 13 |
+| Newly stored reviews verified | 13 |
+
+The stored run status was succeeded, with a completion timestamp.
+
+Newly saved reviews had the expected userId and productId.
+
+The check identified newly added reviews by comparing their database
+IDs before and after the import.
+
+This verifies the coordinator through direct service calls against
+real providers. The new review records and ingestion run remain in
+Firestore for inspection.
+
+Previous sample reviews and earlier imported reviews also remain
+under the test product.
+
+The successful manual check did not exercise live failure recovery,
+concurrent requests, or cross-user HTTP access. Those behaviors are
+covered by isolated automated tests and require integration testing.
+
+## Remaining integration work
+
+- Connect authenticated controllers and routes.
+- Confirm and implement the status endpoint contract.
+- Serialize timestamps and agree on pagination behavior.
+- Connect the frontend ingestion button and status display.
+- Test authenticated HTTP success, failure, and ownership isolation.
+- Confirm current GitHub CI results.
+- Complete team review before merging.
