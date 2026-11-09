@@ -1,9 +1,9 @@
+import { AppError } from '../utils/AppError.js';
+
 const ENDPOINT = 'https://rest.canopyapi.co/api/amazon/product/top-reviews';
 
 function failure(code, message, status = 502) {
-    const error = new Error(message);
-    Object.assign(error, { code, status });
-    return error;
+    return new AppError(status, code, message);
 }
 
 // US Amazon product URLs only. Never fetch a user-supplied host directly.
