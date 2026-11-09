@@ -19,6 +19,12 @@
 - Changed: The middleware trims the name and URL, checks a 200-character name limit and S1-015-compatible Amazon product links, and sends one `400 VALIDATION_ERROR` detail per invalid field. Tests cover rejected inputs with no write, accepted regional links, trimming, and forged `userId` ownership.
 - Rejected: Accepting a bare ASIN directly in `amazonUrl`; S1-015 converts one to a product URL before calling the API. No dependency, Amazon request, ASIN field, or frontend change was added.
 
+## Follow-up: Restrict Amazon URL hosts
+
+- Developer request: "only accepts strictly HTTPS links from amazon.com or www.amazon.com, with /dp/<ASIN> or /gp/product/<ASIN> and a 10-character ASIN."
+- Changed: Backend and frontend URL validation now allow only HTTPS on `amazon.com` or `www.amazon.com`, and reject credentials, nonstandard ports, regional domains, other subdomains, and ASCII control characters before trimming or URL parsing. Frontend bare-ASIN conversion remains and creates an HTTPS `www.amazon.com/dp/<ASIN>` URL. The backend continues to reject bare ASIN values.
+- Tests first failed against the old policy, demonstrating acceptance of HTTP, regional domains, arbitrary Amazon subdomains, credentials, and nonstandard ports. Updated checks run against the Express route and frontend validator.
+
 ## Verification and review
 
 - Supertest uses fake tokens and in-memory Firestore behavior. No production credentials or real user data were used.

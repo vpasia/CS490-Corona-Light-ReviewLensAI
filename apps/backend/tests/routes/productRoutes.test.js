@@ -244,6 +244,31 @@ test.each([
         'amazonUrl',
     ],
     [
+        'HTTP scheme',
+        { amazonUrl: 'http://www.amazon.com/dp/B0ABCDEF12' },
+        'amazonUrl',
+    ],
+    [
+        'regional Amazon domain',
+        { amazonUrl: 'https://www.amazon.co.uk/dp/B0ABCDEF12' },
+        'amazonUrl',
+    ],
+    [
+        'Amazon subdomain',
+        { amazonUrl: 'https://smile.amazon.com/dp/B0ABCDEF12' },
+        'amazonUrl',
+    ],
+    [
+        'URL credentials',
+        { amazonUrl: 'https://user:pass@www.amazon.com/dp/B0ABCDEF12' },
+        'amazonUrl',
+    ],
+    [
+        'nonstandard port',
+        { amazonUrl: 'https://www.amazon.com:8443/dp/B0ABCDEF12' },
+        'amazonUrl',
+    ],
+    [
         'Amazon search page',
         { amazonUrl: 'https://www.amazon.com/s?k=watch' },
         'amazonUrl',
@@ -323,16 +348,35 @@ test.each(['\n', '\r', '\t'])(
     }
 );
 
+test.each([0, 1, 9, 10, 13, 31, 127])(
+    'rejects boundary ASCII control characters in product URLs (code %i)',
+    async (code) => {
+        verifyIdToken.mockResolvedValue({ uid: 'user-A' });
+        const character = String.fromCharCode(code);
+        const response = await request(app)
+            .post('/api/products')
+            .set('Authorization', 'Bearer token-A')
+            .send({
+                ...productInput,
+                amazonUrl: `${character}https://amazon.com/dp/B0ABCDEF12${character}`,
+            });
+
+        expect(response.status).toBe(400);
+        expect(response.body.error).toMatchObject({
+            code: 'VALIDATION_ERROR',
+            details: [{ field: 'amazonUrl', message: expect.any(String) }],
+        });
+        expect(documents.size).toBe(0);
+    }
+);
+
 test.each([
+    ['an amazon.com /dp/ link', 'https://amazon.com/dp/B0ABCDEF12'],
     [
         'a /dp/ link with tracking',
         'https://www.amazon.com/Echo/dp/B0ABCDEF12/ref=abc?tag=example',
     ],
-    [
-        'a UK /gp/product/ link',
-        'https://www.amazon.co.uk/gp/product/B0ABCDEF12',
-    ],
-    ['a Japanese /dp/ link', 'http://amazon.co.jp/dp/B0ABCDEF12'],
+    ['a /gp/product/ link', 'https://amazon.com/gp/product/B0ABCDEF12'],
     [
         'a URL converted from a bare ASIN by S1-015',
         'https://www.amazon.com/dp/B0ABCDEF12',
