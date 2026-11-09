@@ -19,8 +19,12 @@
 **Prompt (summary):** Asked where `onProductAdded?.();` belongs in `handleSubmit`, since I couldn't find the line I was told to add it after.
 **Response (summary):** Claude pointed to the `setErrors({});` line inside the `try` block and sent the full `try` block for pasting.
 
+### 4. The missing backend endpoint
+**Prompt (summary):** Told Claude that Christian reviewing PR 17 pointed out GET /api/products didn't exist yet, since S1-017 covers both frontend and backend, and pasted the backend `src` and `tests` code (app, routes, controller, services, middleware, and existing tests).
+**Response (summary):** Claude followed the existing route, controller, and service layers. It added a `listProducts` service that queries Firestore only for products where `userId` equals the verified user's ID and returns only public fields, newest first (sorted in code to avoid needing a composite index), a `getProducts` controller returning `{ data, nextCursor, count }`, a `GET /` route, and Jest and Supertest tests with a fake Firestore covering ownership. Code omitted; see the PR files.
+
 ## What was kept, changed, or rejected
 - **Kept:** the list component, hook, shared components, and tests, after I read them and could explain them.
 - **Changed:** the hook was rewritten after the lint error. The list refreshes after a product is added.
-- **Not done:** pagination (first page only), sorting, a link target for each row (S1-018 builds the workspace page), and the backend ownership tests (backend ticket).
+- **Not done:** pagination (first page only), sorting, a link target for each row (S1-018 builds the workspace page), and cursor pagination on the backend list endpoint.
 - **Secrets / user data:** none included.
