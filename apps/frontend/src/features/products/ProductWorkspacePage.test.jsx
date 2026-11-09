@@ -116,7 +116,7 @@ describe('ProductWorkspacePage', () => {
 
   it('confirms how many reviews were imported', async () => {
     getProduct.mockResolvedValue(product);
-    importReviews.mockResolvedValue({ importedCount: 12 });
+    importReviews.mockResolvedValue({ savedCount: 12 });
     const user = userEvent.setup();
     renderWorkspace();
 

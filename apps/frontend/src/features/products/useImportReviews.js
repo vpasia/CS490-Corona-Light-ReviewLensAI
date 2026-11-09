@@ -14,7 +14,7 @@ export function useImportReviews(productId) {
 
     try {
       const result = await importReviews(productId);
-      const importedCount = typeof result?.importedCount === 'number' ? result.importedCount : null;
+      const importedCount = typeof result?.savedCount === 'number' ? result.savedCount : null;
       setState({ status: 'success', importedCount, errorMessage: '' });
     } catch (error) {
       setState({

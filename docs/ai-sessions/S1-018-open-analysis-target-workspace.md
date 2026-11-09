@@ -18,5 +18,5 @@
 ## What was kept, changed, or rejected
 - **Kept:** the workspace page, hooks, import panel, and tests, after I read them and could explain them.
 - **Changed:** the failing test's matcher. The page showed a neutral "Ready to import reviews" on load instead of "no reviews yet" because there is no endpoint to say whether an earlier import happened.
-- **Not done:** the Reviews and Ask tabs, showing persisted ingestion status after a refresh, a reviews list, and all backend endpoints (other tickets). The `importedCount` response field is an assumption to confirm with Jerome.
+- **Not done:** the Reviews and Ask tabs, showing persisted ingestion status after a refresh, a reviews list, and all backend endpoints (other tickets). Jerome confirmed the import response field is savedCount, which the page reads.
 - **Secrets / user data:** none included.
