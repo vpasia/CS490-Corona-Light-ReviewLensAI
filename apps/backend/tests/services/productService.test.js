@@ -1,173 +1,195 @@
-import { expect, test, jest } from '@jest/globals';
-import { FieldValue } from 'firebase-admin/firestore';
-
+import { jest, describe, it, expect } from '@jest/globals';
+import { memoryDb } from '../helpers/memoryDb.js';
 jest.unstable_mockModule('../../src/config/firebaseAdmin.js', () => ({
-    getDb: jest.fn(),
+    getDb: () => {
+        throw new Error('Unexpected live access');
+    },
 }));
-
-const { createProduct } = await import('../../src/services/productService.js');
-
+jest.unstable_mockModule('firebase-admin/firestore', () => ({
+    FieldValue: {
+        serverTimestamp: () => 'SERVER_TIME',
+        delete: () => 'DELETE_FIELD',
+    },
+}));
+const { createProduct, listProducts, deleteProduct } =
+    await import('../../src/services/productService.js');
 const { getOwnedProduct } = await import('../../src/services/ownership.js');
-
-function fakeFirestore() {
-    const documents = new Map();
-    let nextId = 1;
-    const db = {
-        collection(name) {
-            if (name !== 'products')
-                throw new Error(`Unexpected collection: ${name}`);
-            return {
-                doc(id = `product-${nextId++}`) {
-                    return {
-                        id,
-                        async set(value) {
-                            documents.set(id, value);
-                        },
-                        async get() {
-                            return {
-                                exists: documents.has(id),
-                                data: () => documents.get(id),
-                            };
-                        },
-                    };
-                },
-            };
+const asin = 'B07PRVS98X',
+    url = `https://www.amazon.com/dp/${asin}`;
+const product = (userId) => ({
+    userId,
+    asin,
+    amazonUrl: url,
+    productName: 'Headphones',
+    platform: 'amazon',
+});
+const setup = () =>
+    memoryDb({
+        products: { A: product('a'), B: product('b') },
+        reviews: {
+            R: {
+                asin,
+                cacheVersion: 'v',
+                text: 'Real public review',
+                rating: 5,
+            },
         },
-    };
-    return { db, documents };
-}
-
-test('creates one owned Amazon product with its source URL', async () => {
-    const { db, documents } = fakeFirestore();
-    const productId = await createProduct(
-        'user-A',
-        {
-            productName: 'Example watch',
-            amazonUrl: 'https://www.amazon.com/dp/B012345678',
+        ingestionRuns: {
+            RA: { userId: 'a', productId: 'A' },
+            RB: { userId: 'b', productId: 'B' },
         },
-        db
-    );
-
-    expect(productId).toBe('product-1');
-    expect(documents.size).toBe(1);
-    const saved = documents.get(productId);
-    expect(saved).toEqual({
-        productId: 'product-1',
-        userId: 'user-A',
-        productName: 'Example watch',
-        platform: 'amazon',
-        amazonUrl: 'https://www.amazon.com/dp/B012345678',
-        createdAt: expect.any(FieldValue),
+        reviewCaches: { [asin]: { version: 'v', asin } },
     });
-    expect(saved.createdAt.isEqual(FieldValue.serverTimestamp())).toBe(true);
-});
-
-test.each([
-    [
-        'missing uid',
-        '',
-        'Example watch',
-        'https://www.amazon.com/dp/B012345678',
-    ],
-    ['missing name', 'user-A', ' ', 'https://www.amazon.com/dp/B012345678'],
-    ['missing URL', 'user-A', 'Example watch', ' '],
-])(
-    'rejects %s without writing a product',
-    async (_case, uid, productName, amazonUrl) => {
-        const { db, documents } = fakeFirestore();
-
-        await expect(
-            createProduct(uid, { productName, amazonUrl }, db)
-        ).rejects.toThrow();
-        expect(documents.size).toBe(0);
-    }
-);
-
-test('ignores ownership and metadata supplied in product input', async () => {
-    const { db, documents } = fakeFirestore();
-    const productId = await createProduct(
-        'user-B',
-        {
-            productName: 'Example watch',
-            amazonUrl: 'https://www.amazon.com/dp/B012345678',
-            userId: 'user-A',
-            productId: 'forged-id',
-            platform: 'other',
-            createdAt: 'forged-time',
-        },
-        db
-    );
-
-    const saved = documents.get(productId);
-    expect(saved.userId).toBe('user-B');
-    expect(saved.productId).toBe('product-1');
-    expect(saved.platform).toBe('amazon');
-    expect(saved.createdAt.isEqual(FieldValue.serverTimestamp())).toBe(true);
-});
-
-test('retrieves the saved product for its owner', async () => {
-    const { db, documents } = fakeFirestore();
-    const saved = {
-        productId: 'product-7',
-        userId: 'user-A',
-        productName: 'Example watch',
-        platform: 'amazon',
-        amazonUrl: 'https://www.amazon.com/dp/B012345678',
-        createdAt: 'saved-time',
-    };
-    documents.set('product-7', saved);
-
-    await expect(getOwnedProduct('user-A', 'product-7', db)).resolves.toEqual(
-        saved
-    );
-});
-
-test.each([
-    ['missing product', 'missing-id'],
-    ["another user's product", 'product-7'],
-])('returns the same 404 for %s', async (_case, productId) => {
-    const { db, documents } = fakeFirestore();
-    documents.set('product-7', {
-        productId: 'product-7',
-        userId: 'user-A',
-        productName: 'Private watch',
-    });
-
-    await expect(
-        getOwnedProduct('user-B', productId, db)
-    ).rejects.toMatchObject({
-        status: 404,
-        code: 'PRODUCT_NOT_FOUND',
-        message: 'Product not found.',
-    });
-});
-
-test('gives two users separate products for the same Amazon URL', async () => {
-    const { db, documents } = fakeFirestore();
-    const input = {
-        productName: 'Example watch',
-        amazonUrl: 'https://www.amazon.com/dp/B012345678',
-    };
-
-    const firstId = await createProduct('user-A', input, db);
-    const secondId = await createProduct('user-B', input, db);
-
-    expect(firstId).not.toBe(secondId);
-    expect(documents.get(firstId).userId).toBe('user-A');
-    expect(documents.get(secondId).userId).toBe('user-B');
-});
-
-test.each([undefined, ''])(
-    'rejects retrieval without a verified uid (%s)',
-    async (uid) => {
-        const { db, documents } = fakeFirestore();
-        documents.set('product-7', { productId: 'product-7', userId: uid });
-
-        await expect(
-            getOwnedProduct(uid, 'product-7', db)
-        ).rejects.toMatchObject({
-            status: 401,
-            code: 'UNAUTHENTICATED',
+describe('product ASIN references and deletion', () => {
+    it('derives ASIN on the server and ignores client ownership/ASIN fields', async () => {
+        const db = memoryDb();
+        const id = await createProduct(
+            'a',
+            {
+                productName: ' Headphones ',
+                amazonUrl: url.toLowerCase(),
+                asin: 'FORGED',
+                userId: 'forged',
+            },
+            db
+        );
+        expect(db.data('products', id)).toMatchObject({
+            userId: 'a',
+            productName: 'Headphones',
         });
-    }
-);
+    });
+    it('rejects unsupported input before making a product', async () => {
+        const db = memoryDb();
+        await expect(
+            createProduct(
+                'a',
+                {
+                    productName: 'Headphones',
+                    amazonUrl: 'http://amazon.com/dp/B07PRVS98X',
+                },
+                db
+            )
+        ).rejects.toMatchObject({ code: 'INVALID_AMAZON_URL' });
+        expect(db.docs('products')).toHaveLength(0);
+        await expect(
+            createProduct('', { productName: 'X', amazonUrl: url }, db)
+        ).rejects.toMatchObject({ code: 'UNAUTHENTICATED' });
+        await expect(
+            createProduct('a', { amazonUrl: url }, db)
+        ).rejects.toMatchObject({ code: 'VALIDATION_ERROR' });
+    });
+    it('lists only owned products without changing the existing summary contract', async () => {
+        const db = setup();
+        const products = await listProducts('a', db);
+        expect(products).toHaveLength(1);
+        expect(products[0]).toMatchObject({ productName: 'Headphones' });
+    });
+    it('preserves shared reviews and the other owners history when deleting one target', async () => {
+        const db = setup();
+        await deleteProduct('a', 'A', db);
+        expect(db.data('products', 'A')).toBeUndefined();
+        expect(db.data('products', 'B')).toBeDefined();
+        expect(db.docs('reviews')).toHaveLength(1);
+        expect(db.data('ingestionRuns', 'RA')).toBeUndefined();
+        expect(db.data('ingestionRuns', 'RB')).toBeDefined();
+    });
+    it('removes shared reviews and cache only after deleting the last reference', async () => {
+        const db = setup();
+        await deleteProduct('a', 'A', db);
+        await deleteProduct('b', 'B', db);
+        expect(db.docs('products')).toHaveLength(0);
+        expect(db.docs('reviews')).toHaveLength(0);
+        expect(db.docs('reviewCaches')).toHaveLength(0);
+    });
+    it('rejects foreign and missing products without deleting anything', async () => {
+        const db = setup();
+        for (const id of ['B', 'missing'])
+            await expect(deleteProduct('a', id, db)).rejects.toMatchObject({
+                code: 'PRODUCT_NOT_FOUND',
+            });
+        expect(db.docs('products')).toHaveLength(2);
+        expect(db.docs('reviews')).toHaveLength(1);
+    });
+    it('blocks deletion during an active import', async () => {
+        const db = setup();
+        await db
+            .collection('products')
+            .doc('A')
+            .update({
+                activeIngestionRunId: 'r',
+                ingestionLockUntil: Date.now() + 60000,
+            });
+        await expect(deleteProduct('a', 'A', db)).rejects.toMatchObject({
+            code: 'INGESTION_IN_PROGRESS',
+        });
+        expect(db.data('products', 'A').deleting).toBeUndefined();
+    });
+    it('allows cleanup retry after a bounded batch fails', async () => {
+        const db = setup();
+        db.controls.failBatch = true;
+        await expect(deleteProduct('a', 'A', db)).rejects.toThrow();
+        expect(db.data('products', 'A').deleting).toBe(true);
+        await expect(getOwnedProduct('a', 'A', db)).rejects.toMatchObject({
+            code: 'PRODUCT_NOT_FOUND',
+        });
+        db.controls.failBatch = false;
+        await deleteProduct('a', 'A', db);
+        expect(db.data('products', 'A')).toBeUndefined();
+    });
+    it('blocks new references while last-target review cleanup is pending', async () => {
+        const db = memoryDb({
+            reviewCaches: { [asin]: { deleting: true, cleanupProductId: 'A' } },
+        });
+        await expect(
+            createProduct(
+                'b',
+                { productName: 'Headphones', amazonUrl: url },
+                db
+            )
+        ).rejects.toMatchObject({ code: 'REVIEW_CACHE_BUSY' });
+        expect(db.docs('products')).toHaveLength(0);
+    });
+    it('handles simultaneous deletion of two references without orphaning reviews', async () => {
+        const db = setup();
+        await Promise.all([
+            deleteProduct('a', 'A', db),
+            deleteProduct('b', 'B', db),
+        ]);
+        expect(db.docs('products')).toHaveLength(0);
+        expect(db.docs('reviews')).toHaveLength(0);
+    });
+    it('preserves shared reviews for old targets not yet backfilled with ASIN', async () => {
+        const db = setup();
+        await db
+            .collection('products')
+            .doc('B')
+            .set({ userId: 'b', amazonUrl: url });
+        await deleteProduct('a', 'A', db);
+        expect(db.docs('reviews')).toHaveLength(1);
+    });
+    it('retains backfilled ASIN reviews even if their legacy ownership fields remain', async () => {
+        const db = setup();
+        await db
+            .collection('reviews')
+            .doc('R')
+            .update({ userId: 'a', productId: 'A' });
+        await deleteProduct('a', 'A', db);
+        expect(db.docs('reviews')).toHaveLength(1);
+    });
+    it('cleans multiple review generations across bounded batches for the last target', async () => {
+        const reviews = Object.fromEntries(
+            Array.from({ length: 850 }, (_, i) => [
+                `R${i}`,
+                { asin, cacheVersion: `v${i % 3}`, rating: 4, text: 'Review' },
+            ])
+        );
+        const db = memoryDb({
+            products: { A: product('a') },
+            reviews,
+            reviewCaches: { [asin]: { asin, version: 'v1' } },
+        });
+        await deleteProduct('a', 'A', db);
+        expect(db.docs('reviews')).toHaveLength(0);
+        expect(db.docs('products')).toHaveLength(0);
+    });
+});
