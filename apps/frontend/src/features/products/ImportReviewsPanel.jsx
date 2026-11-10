@@ -2,7 +2,23 @@ import { CircleAlert, LoaderCircle } from 'lucide-react';
 
 import { Button } from '@/components/ui/button';
 
-function ImportStatus({ status, importedCount, errorMessage }) {
+function pluralize(count, singular, plural) {
+  return count === 1 ? singular : plural;
+}
+
+function describeSuccess({ importedCount, reused, reviewCount }) {
+  if (reused) {
+    return reviewCount === null
+      ? 'Using cached reviews.'
+      : `Using ${reviewCount} cached ${pluralize(reviewCount, 'review', 'reviews')}.`;
+  }
+  if (importedCount === null) {
+    return 'Reviews imported just now.';
+  }
+  return `Imported ${importedCount} ${pluralize(importedCount, 'review', 'reviews')} just now.`;
+}
+
+function ImportStatus({ status, importedCount, reused, reviewCount, errorMessage }) {
   if (status === 'loading') {
     return (
       <p className="flex items-center gap-2 text-[#6B6B6B]">
@@ -13,11 +29,9 @@ function ImportStatus({ status, importedCount, errorMessage }) {
   }
 
   if (status === 'success') {
-    const text =
-      importedCount === null
-        ? 'Reviews imported just now.'
-        : `Imported ${importedCount} ${importedCount === 1 ? 'review' : 'reviews'} just now.`;
-    return <p className="text-[#16A34A]">{text}</p>;
+    return (
+      <p className="text-[#16A34A]">{describeSuccess({ importedCount, reused, reviewCount })}</p>
+    );
   }
 
   if (status === 'error') {
@@ -32,7 +46,14 @@ function ImportStatus({ status, importedCount, errorMessage }) {
   return <p className="text-[#6B6B6B]">Ready to import reviews from Amazon.</p>;
 }
 
-export default function ImportReviewsPanel({ status, importedCount, errorMessage, onImport }) {
+export default function ImportReviewsPanel({
+  status,
+  importedCount,
+  reused,
+  reviewCount,
+  errorMessage,
+  onImport,
+}) {
   return (
     <section
       aria-labelledby="import-heading"
@@ -48,7 +69,13 @@ export default function ImportReviewsPanel({ status, importedCount, errorMessage
       </div>
 
       <div aria-live="polite" className="text-sm">
-        <ImportStatus status={status} importedCount={importedCount} errorMessage={errorMessage} />
+        <ImportStatus
+          status={status}
+          importedCount={importedCount}
+          reused={reused}
+          reviewCount={reviewCount}
+          errorMessage={errorMessage}
+        />
       </div>
 
       <Button className="h-10 w-fit px-4" disabled={status === 'loading'} onClick={onImport}>

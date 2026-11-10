@@ -145,4 +145,27 @@ describe('ProductWorkspacePage', () => {
     ).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Try again' })).toBeInTheDocument();
   });
+
+  it('says cached reviews were reused instead of claiming a new import', async () => {
+    getProduct.mockResolvedValue(product);
+    importReviews.mockResolvedValue({ reused: true, savedCount: 0, reviewCount: 30 });
+    const user = userEvent.setup();
+    renderWorkspace();
+
+    await user.click(await screen.findByRole('button', { name: 'Import reviews' }));
+
+    expect(await screen.findByText('Using 30 cached reviews.')).toBeInTheDocument();
+    expect(screen.queryByText(/just now/)).not.toBeInTheDocument();
+  });
+
+  it('still shows a plain message when the cached review count is missing', async () => {
+    getProduct.mockResolvedValue(product);
+    importReviews.mockResolvedValue({ reused: true, savedCount: 0 });
+    const user = userEvent.setup();
+    renderWorkspace();
+
+    await user.click(await screen.findByRole('button', { name: 'Import reviews' }));
+
+    expect(await screen.findByText('Using cached reviews.')).toBeInTheDocument();
+  });
 });

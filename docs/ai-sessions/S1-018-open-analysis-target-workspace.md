@@ -15,6 +15,10 @@
 **Prompt (summary):** Pasted the Vitest output: 62 tests passed, 1 failed (the non-web source test).
 **Response (summary):** Claude explained the page was correct and the test was wrong: the text "javascript:alert(1)" shares a paragraph with "Source:", so an exact-text match found nothing. The fix was matching with a pattern.
 
+### 3. Cached reviews
+**Prompt (summary):** Shared Jerome's answer: cached reviews return `reused: true`, `savedCount: 0`, and `reviewCount`, and the UI should show "Using N cached reviews" when reused and "Imported N reviews just now" for a new import.
+**Response (summary):** Claude updated the import hook to read `savedCount`, `reused`, and `reviewCount`, changed the success message to say cached reviews were reused instead of claiming a new import, and added tests for both cases.
+
 ## What was kept, changed, or rejected
 - **Kept:** the workspace page, hooks, import panel, and tests, after I read them and could explain them.
 - **Changed:** the failing test's matcher. The page showed a neutral "Ready to import reviews" on load instead of "no reviews yet" because there is no endpoint to say whether an earlier import happened.

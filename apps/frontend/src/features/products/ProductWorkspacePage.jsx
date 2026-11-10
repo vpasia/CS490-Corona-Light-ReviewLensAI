@@ -89,6 +89,8 @@ function ProductWorkspace({ productId }) {
       <ImportReviewsPanel
         status={importer.status}
         importedCount={importer.importedCount}
+        reused={importer.reused}
+        reviewCount={importer.reviewCount}
         errorMessage={importer.errorMessage}
         onImport={importer.start}
       />
