@@ -11,7 +11,7 @@ import { toAmazonUrl, validateProductInput, validateProductName } from './valida
 
 const GENERIC_ERROR = 'We couldn’t add that product right now. Please try again.';
 
-export default function AddProductForm() {
+export default function AddProductForm({ onProductAdded }) {
   const nameRef = useRef(null);
   const linkRef = useRef(null);
   const [productName, setProductName] = useState('');
@@ -91,6 +91,7 @@ export default function AddProductForm() {
       setProductName('');
       setProductLink('');
       setErrors({});
+      onProductAdded?.();
     } catch (error) {
       showFailure(error);
     } finally {

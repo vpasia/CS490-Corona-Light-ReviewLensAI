@@ -123,4 +123,15 @@ describe('AddProductForm', () => {
     expect(await screen.findByText(/couldn’t add that product/)).toBeInTheDocument();
     expect(screen.queryByText(/TypeError/)).not.toBeInTheDocument();
   });
+
+  it('tells the page to refresh the product list after a product is added', async () => {
+    createProduct.mockResolvedValue({ productId: 'product-3' });
+    const onProductAdded = vi.fn();
+    const user = userEvent.setup();
+    render(<AddProductForm onProductAdded={onProductAdded} />);
+
+    await fillAndSubmit(user, 'Echo Dot', 'https://www.amazon.com/dp/B0ABCDEF12');
+
+    await waitFor(() => expect(onProductAdded).toHaveBeenCalledTimes(1));
+  });
 });

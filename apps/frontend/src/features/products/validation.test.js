@@ -7,12 +7,12 @@ describe('validateProductInput', () => {
     ['a bare ASIN', 'B0ABCDEF12'],
     ['a lowercase ASIN', 'b0abcdef12'],
     ['a /dp/ product link', 'https://www.amazon.com/dp/B0ABCDEF12'],
+    ['an amazon.com /dp/ link', 'https://amazon.com/dp/B0ABCDEF12'],
     [
       'a product link with a title and tracking',
       'https://www.amazon.com/Echo-Dot/dp/B0ABCDEF12/ref=sr_1_1?keywords=echo',
     ],
     ['a /gp/product/ link', 'https://www.amazon.com/gp/product/B0ABCDEF12'],
-    ['a UK Amazon link', 'https://www.amazon.co.uk/dp/B0ABCDEF12'],
     ['a link with spaces around it', '  https://www.amazon.com/dp/B0ABCDEF12  '],
   ])('accepts %s', (_name, input) => {
     expect(validateProductInput(input)).toBe('');
@@ -27,11 +27,35 @@ describe('validateProductInput', () => {
     ['an ASIN with the wrong length', 'B0ABC'],
     ['a link to another store', 'https://www.ebay.com/itm/B0ABCDEF12'],
     ['a lookalike domain', 'https://amazon.com.evil.example/dp/B0ABCDEF12'],
+    ['an HTTP Amazon URL', 'http://www.amazon.com/dp/B0ABCDEF12'],
+    ['a regional Amazon domain', 'https://www.amazon.co.uk/dp/B0ABCDEF12'],
+    ['an Amazon subdomain', 'https://smile.amazon.com/dp/B0ABCDEF12'],
+    ['a URL with credentials', 'https://user:pass@www.amazon.com/dp/B0ABCDEF12'],
+    ['a URL with a nonstandard port', 'https://www.amazon.com:8443/dp/B0ABCDEF12'],
     ['an Amazon page that is not a product', 'https://www.amazon.com/s?k=echo+dot'],
     ['a link that is not http or https', 'ftp://www.amazon.com/dp/B0ABCDEF12'],
   ])('rejects %s with a plain-language message', (_name, input) => {
     expect(validateProductInput(input)).toMatch(/doesn’t look like an Amazon product link/);
   });
+
+  it.each(['\n', '\r', '\t'])(
+    'rejects embedded control characters in product URLs (%j)',
+    (character) => {
+      expect(validateProductInput(`https://www.ama${character}zon.com/dp/B0ABCDEF12`)).toMatch(
+        /doesn’t look like an Amazon product link/,
+      );
+    },
+  );
+
+  it.each([0, 1, 9, 10, 13, 31, 127])(
+    'rejects boundary ASCII control characters in product URLs (code %i)',
+    (code) => {
+      const character = String.fromCharCode(code);
+      expect(
+        validateProductInput(`${character}https://amazon.com/dp/B0ABCDEF12${character}`),
+      ).toMatch(/doesn’t look like an Amazon product link/);
+    },
+  );
 });
 
 describe('validateProductName', () => {

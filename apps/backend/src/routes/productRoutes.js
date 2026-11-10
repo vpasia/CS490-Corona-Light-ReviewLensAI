@@ -1,7 +1,9 @@
 import { Router } from 'express';
-import { addProduct } from '../controllers/productController.js';
+import { addProduct, getProducts } from '../controllers/productController.js';
+import { validateProductInput } from '../middleware/validateProductInput.js';
 
 const router = Router();
-router.post('/', addProduct);
+router.get('/', getProducts);
+router.post('/', validateProductInput, addProduct);
 
 export default router;
