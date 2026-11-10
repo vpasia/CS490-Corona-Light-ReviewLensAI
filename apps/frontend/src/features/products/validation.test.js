@@ -12,7 +12,7 @@ describe('validateProductInput', () => {
       'https://www.amazon.com/Echo-Dot/dp/B0ABCDEF12/ref=sr_1_1?keywords=echo',
     ],
     ['a /gp/product/ link', 'https://www.amazon.com/gp/product/B0ABCDEF12'],
-    ['a UK Amazon link', 'https://www.amazon.co.uk/dp/B0ABCDEF12'],
+    ['a link without www', 'https://amazon.com/dp/B0ABCDEF12'],
     ['a link with spaces around it', '  https://www.amazon.com/dp/B0ABCDEF12  '],
   ])('accepts %s', (_name, input) => {
     expect(validateProductInput(input)).toBe('');
@@ -23,6 +23,10 @@ describe('validateProductInput', () => {
   });
 
   it.each([
+    ['an http link', 'http://www.amazon.com/dp/B0ABCDEF12'],
+    ['a regional Amazon site', 'https://www.amazon.co.uk/dp/B0ABCDEF12'],
+    ['an Amazon subdomain', 'https://smile.amazon.com/dp/B0ABCDEF12'],
+    ['a link with an embedded tab', 'https://www.amazon.com/dp/B0ABC\tDEF12'],
     ['text that is not a link', 'echo dot'],
     ['an ASIN with the wrong length', 'B0ABC'],
     ['a link to another store', 'https://www.ebay.com/itm/B0ABCDEF12'],

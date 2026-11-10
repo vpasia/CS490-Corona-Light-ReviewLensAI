@@ -121,7 +121,7 @@ export default function AddProductForm({ onProductAdded }) {
         label="Amazon product link or ASIN"
         htmlFor="amazonUrl"
         error={errors.amazonUrl}
-        description="Paste a link containing /dp/ or a 10-character ASIN."
+        description="Paste an amazon.com link containing /dp/ or /gp/product/, or a 10-character ASIN."
       >
         <Input
           id="amazonUrl"
