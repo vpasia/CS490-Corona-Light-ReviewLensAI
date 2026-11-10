@@ -7,3 +7,8 @@ export async function createProduct({ productName, amazonUrl }) {
   });
   return response?.data ?? null;
 }
+
+export async function listProducts() {
+  const response = await apiRequest('/api/products');
+  return response?.data ?? [];
+}
