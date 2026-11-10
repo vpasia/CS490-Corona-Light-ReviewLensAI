@@ -449,3 +449,187 @@ test('returns a safe 500 when Firebase Admin setup fails', async () => {
     expect(documents.size).toBe(0);
     expect(verifyIdToken).not.toHaveBeenCalled();
 });
+
+test.each([
+    ['blank name', { productName: '   ' }, 'productName'],
+    ['non-string name', { productName: 42 }, 'productName'],
+    [
+        'name over 200 characters',
+        { productName: 'a'.repeat(201) },
+        'productName',
+    ],
+    ['non-string URL', { amazonUrl: 42 }, 'amazonUrl'],
+    ['malformed URL', { amazonUrl: 'not a URL' }, 'amazonUrl'],
+    ['bare ASIN', { amazonUrl: 'B0ABCDEF12' }, 'amazonUrl'],
+    [
+        'another store',
+        { amazonUrl: 'https://www.ebay.com/dp/B0ABCDEF12' },
+        'amazonUrl',
+    ],
+    [
+        'lookalike host',
+        { amazonUrl: 'https://amazon.com.evil.example/dp/B0ABCDEF12' },
+        'amazonUrl',
+    ],
+    [
+        'HTTP scheme',
+        { amazonUrl: 'http://www.amazon.com/dp/B0ABCDEF12' },
+        'amazonUrl',
+    ],
+    [
+        'regional Amazon domain',
+        { amazonUrl: 'https://www.amazon.co.uk/dp/B0ABCDEF12' },
+        'amazonUrl',
+    ],
+    [
+        'Amazon subdomain',
+        { amazonUrl: 'https://smile.amazon.com/dp/B0ABCDEF12' },
+        'amazonUrl',
+    ],
+    [
+        'URL credentials',
+        { amazonUrl: 'https://user:pass@www.amazon.com/dp/B0ABCDEF12' },
+        'amazonUrl',
+    ],
+    [
+        'nonstandard port',
+        { amazonUrl: 'https://www.amazon.com:8443/dp/B0ABCDEF12' },
+        'amazonUrl',
+    ],
+    [
+        'Amazon search page',
+        { amazonUrl: 'https://www.amazon.com/s?k=watch' },
+        'amazonUrl',
+    ],
+    [
+        'short ASIN',
+        { amazonUrl: 'https://www.amazon.com/dp/B0ABC' },
+        'amazonUrl',
+    ],
+    [
+        'long ASIN',
+        { amazonUrl: 'https://www.amazon.com/dp/B0ABCDEF123' },
+        'amazonUrl',
+    ],
+    [
+        'punctuated ASIN',
+        { amazonUrl: 'https://www.amazon.com/gp/product/B0ABCDE-12' },
+        'amazonUrl',
+    ],
+    [
+        'non-web protocol',
+        { amazonUrl: 'ftp://www.amazon.com/dp/B0ABCDEF12' },
+        'amazonUrl',
+    ],
+])('rejects %s before writing', async (_case, override, field) => {
+    verifyIdToken.mockResolvedValue({ uid: 'user-A' });
+    const response = await request(app)
+        .post('/api/products')
+        .set('Authorization', 'Bearer token-A')
+        .send({ ...productInput, ...override });
+
+    expect(response.status).toBe(400);
+    expect(response.body.error).toMatchObject({
+        code: 'VALIDATION_ERROR',
+        details: [{ field, message: expect.any(String) }],
+    });
+    expect(response.body.error.details[0].message.length).toBeGreaterThan(0);
+    expect(documents.size).toBe(0);
+});
+
+test('returns one detail for each invalid field', async () => {
+    verifyIdToken.mockResolvedValue({ uid: 'user-A' });
+    const response = await request(app)
+        .post('/api/products')
+        .set('Authorization', 'Bearer token-A')
+        .send({ productName: ' ', amazonUrl: 'no link' });
+
+    expect(response.status).toBe(400);
+    expect(response.body.error).toMatchObject({
+        code: 'VALIDATION_ERROR',
+        details: [
+            { field: 'productName', message: expect.any(String) },
+            { field: 'amazonUrl', message: expect.any(String) },
+        ],
+    });
+    expect(documents.size).toBe(0);
+});
+
+test.each(['\n', '\r', '\t'])(
+    'rejects a product URL containing an embedded control character (%j)',
+    async (character) => {
+        verifyIdToken.mockResolvedValue({ uid: 'user-A' });
+        const response = await request(app)
+            .post('/api/products')
+            .set('Authorization', 'Bearer token-A')
+            .send({
+                ...productInput,
+                amazonUrl: `https://www.ama${character}zon.com/dp/B0ABCDEF12`,
+            });
+
+        expect(response.status).toBe(400);
+        expect(response.body.error).toMatchObject({
+            code: 'VALIDATION_ERROR',
+            details: [{ field: 'amazonUrl', message: expect.any(String) }],
+        });
+        expect(documents.size).toBe(0);
+    }
+);
+
+test.each([0, 1, 9, 10, 13, 31, 127])(
+    'rejects boundary ASCII control characters in product URLs (code %i)',
+    async (code) => {
+        verifyIdToken.mockResolvedValue({ uid: 'user-A' });
+        const character = String.fromCharCode(code);
+        const response = await request(app)
+            .post('/api/products')
+            .set('Authorization', 'Bearer token-A')
+            .send({
+                ...productInput,
+                amazonUrl: `${character}https://amazon.com/dp/B0ABCDEF12${character}`,
+            });
+
+        expect(response.status).toBe(400);
+        expect(response.body.error).toMatchObject({
+            code: 'VALIDATION_ERROR',
+            details: [{ field: 'amazonUrl', message: expect.any(String) }],
+        });
+        expect(documents.size).toBe(0);
+    }
+);
+
+test.each([
+    ['an amazon.com /dp/ link', 'https://amazon.com/dp/B0ABCDEF12'],
+    [
+        'a /dp/ link with tracking',
+        'https://www.amazon.com/Echo/dp/B0ABCDEF12/ref=abc?tag=example',
+    ],
+    ['a /gp/product/ link', 'https://amazon.com/gp/product/B0ABCDEF12'],
+    [
+        'a URL converted from a bare ASIN by S1-015',
+        'https://www.amazon.com/dp/B0ABCDEF12',
+    ],
+])(
+    'creates one product from %s with trimmed fields and verified ownership',
+    async (_case, url) => {
+        verifyIdToken.mockResolvedValue({ uid: 'user-B' });
+        const response = await request(app)
+            .post('/api/products')
+            .set('Authorization', 'Bearer token-B')
+            .send({
+                productName: '  Example watch  ',
+                amazonUrl: `  ${url}  `,
+                userId: 'user-A',
+            });
+
+        expect(response.status).toBe(201);
+        expect(response.body).toEqual({ data: { productId: 'product-1' } });
+        expect(documents.size).toBe(1);
+        expect(documents.get('product-1')).toMatchObject({
+            productId: 'product-1',
+            userId: 'user-B',
+            productName: 'Example watch',
+            amazonUrl: url,
+        });
+    }
+);
