@@ -46,6 +46,162 @@ test('creates one product owned by the verified user', async () => {
     expect(verifyIdToken).toHaveBeenCalledWith('token-A');
 });
 
+test('owner can read a target while another user gets the same 404 as a missing ID', async () => {
+    documents.set('target-A', { productId: 'target-A', userId: 'user-A' });
+    verifyIdToken.mockImplementation(async (token) => ({
+        uid: token === 'token-A' ? 'user-A' : 'user-B',
+    }));
+
+    const owner = await request(app)
+        .get('/api/products/target-A')
+        .set('Authorization', 'Bearer token-A');
+    const foreign = await request(app)
+        .get('/api/products/target-A')
+        .set('Authorization', 'Bearer token-B');
+    const missing = await request(app)
+        .get('/api/products/missing')
+        .set('Authorization', 'Bearer token-B');
+
+    expect(owner.status).toBe(200);
+    expect(owner.body.data).toMatchObject({ productId: 'target-A' });
+    expect(foreign.status).toBe(404);
+    expect(foreign.body).toEqual(missing.body);
+});
+
+test('foreign delete cannot change a target, review, or ingestion run', async () => {
+    const target = {
+        productId: 'target-A',
+        userId: 'user-A',
+        asin: 'B012345678',
+        amazonUrl: productInput.amazonUrl,
+    };
+    documents.set('target-A', target);
+    db.maps.set('reviews', new Map([['review-1', { asin: target.asin }]]));
+    db.maps.set(
+        'ingestionRuns',
+        new Map([['run-1', { userId: 'user-A', productId: 'target-A' }]])
+    );
+    verifyIdToken.mockResolvedValue({ uid: 'user-B' });
+
+    const foreign = await request(app)
+        .delete('/api/products/target-A')
+        .set('Authorization', 'Bearer token-B');
+    const missing = await request(app)
+        .delete('/api/products/missing')
+        .set('Authorization', 'Bearer token-B');
+
+    expect(foreign.status).toBe(404);
+    expect(foreign.body).toEqual(missing.body);
+    expect(documents.get('target-A')).toEqual(target);
+    expect(db.docs('reviews')).toHaveLength(1);
+    expect(db.docs('ingestionRuns')).toHaveLength(1);
+});
+
+test('owner delete keeps shared reviews while another target references the ASIN', async () => {
+    const asin = 'B012345678';
+    documents.set('target-A', {
+        productId: 'target-A',
+        userId: 'user-A',
+        asin,
+        amazonUrl: productInput.amazonUrl,
+    });
+    documents.set('target-B', {
+        productId: 'target-B',
+        userId: 'user-B',
+        asin,
+        amazonUrl: productInput.amazonUrl,
+    });
+    db.maps.set('reviews', new Map([['review-1', { asin }]]));
+    db.maps.set(
+        'ingestionRuns',
+        new Map([
+            ['run-A', { userId: 'user-A', productId: 'target-A' }],
+            ['run-B', { userId: 'user-B', productId: 'target-B' }],
+        ])
+    );
+    verifyIdToken.mockResolvedValue({ uid: 'user-A' });
+
+    const response = await request(app)
+        .delete('/api/products/target-A')
+        .set('Authorization', 'Bearer token-A');
+
+    expect(response.status).toBe(200);
+    expect(response.body).toEqual({ data: { productId: 'target-A' } });
+    expect(documents.has('target-A')).toBe(false);
+    expect(documents.has('target-B')).toBe(true);
+    expect(db.docs('reviews')).toHaveLength(1);
+    expect(db.data('ingestionRuns', 'run-A')).toBeUndefined();
+    expect(db.data('ingestionRuns', 'run-B')).toBeDefined();
+});
+
+test('GET hides a deleting target and DELETE can retry its cleanup', async () => {
+    documents.set('target-A', {
+        productId: 'target-A',
+        userId: 'user-A',
+        asin: 'B012345678',
+        amazonUrl: productInput.amazonUrl,
+        deleting: true,
+    });
+    verifyIdToken.mockResolvedValue({ uid: 'user-A' });
+
+    const read = await request(app)
+        .get('/api/products/target-A')
+        .set('Authorization', 'Bearer token-A');
+    const deletion = await request(app)
+        .delete('/api/products/target-A')
+        .set('Authorization', 'Bearer token-A');
+
+    expect(read.status).toBe(404);
+    expect(deletion.status).toBe(200);
+    expect(documents.has('target-A')).toBe(false);
+});
+
+test('owner delete rejects an active import and keeps the target', async () => {
+    documents.set('target-A', {
+        productId: 'target-A',
+        userId: 'user-A',
+        asin: 'B012345678',
+        amazonUrl: productInput.amazonUrl,
+        activeIngestionRunId: 'run-A',
+        ingestionLockUntil: Date.now() + 60_000,
+    });
+    verifyIdToken.mockResolvedValue({ uid: 'user-A' });
+
+    const response = await request(app)
+        .delete('/api/products/target-A')
+        .set('Authorization', 'Bearer token-A');
+
+    expect(response.status).toBe(409);
+    expect(response.body.error.code).toBe('INGESTION_IN_PROGRESS');
+    expect(documents.get('target-A').deleting).toBeUndefined();
+});
+
+test.each(['get', 'delete'])(
+    '%s requires a valid bearer token',
+    async (method) => {
+        const missing = await request(app)[method]('/api/products/target-A');
+        verifyIdToken.mockRejectedValue(new Error('invalid token'));
+        const invalid = await request(app)
+            [method]('/api/products/target-A')
+            .set('Authorization', 'Bearer invalid');
+        expect(missing.status).toBe(401);
+        expect(invalid.status).toBe(401);
+        expect(invalid.body.error.code).toBe('UNAUTHENTICATED');
+    }
+);
+
+test.each(['get', 'delete'])(
+    '%s rejects a decoded product ID containing a slash',
+    async (method) => {
+        verifyIdToken.mockResolvedValue({ uid: 'user-A' });
+        const response = await request(app)
+            [method]('/api/products/target%2FA')
+            .set('Authorization', 'Bearer token-A');
+        expect(response.status).toBe(400);
+        expect(response.body.error.code).toBe('VALIDATION_ERROR');
+    }
+);
+
 test('ignores a forged userId and saves the verified user B as owner', async () => {
     verifyIdToken.mockResolvedValue({ uid: 'user-B' });
 
