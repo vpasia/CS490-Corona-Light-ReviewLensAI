@@ -6,10 +6,14 @@ let db = memoryDb({ products: {} });
 let documents = db.maps.get('products');
 const verifyIdToken = jest.fn();
 const getFirebaseAuth = jest.fn();
+const fetchCanopyReviews = jest.fn();
 
 jest.unstable_mockModule('../../src/config/firebaseAdmin.js', () => ({
     getDb: () => db,
     getFirebaseAuth,
+}));
+jest.unstable_mockModule('../../src/services/canopyService.js', () => ({
+    fetchCanopyReviews,
 }));
 
 const { default: app } = await import('../../src/app.js');
@@ -23,7 +27,179 @@ beforeEach(() => {
     documents = db.maps.get('products');
     verifyIdToken.mockReset();
     getFirebaseAuth.mockReset();
+    fetchCanopyReviews.mockReset();
     getFirebaseAuth.mockReturnValue({ verifyIdToken });
+});
+
+test('user B cannot retrieve user A target reviews through the authenticated route', async () => {
+    const asin = 'B012345678';
+    db = memoryDb({
+        products: {
+            'target-A': {
+                productId: 'target-A',
+                userId: 'user-A',
+                amazonUrl: `https://www.amazon.com/dp/${asin}`,
+            },
+        },
+        reviewCaches: {
+            [asin]: {
+                asin,
+                version: 'generation-1',
+                fetchedAtMs: Date.now(),
+                expiresAtMs: Date.now() + 60_000,
+                reviewCount: 1,
+            },
+        },
+        reviews: {
+            review1: {
+                asin,
+                cacheVersion: 'generation-1',
+                text: 'Private test fixture',
+                rating: 5,
+            },
+        },
+    });
+    verifyIdToken.mockImplementation(async (token) => ({
+        uid: token === 'token-A' ? 'user-A' : 'user-B',
+    }));
+
+    const foreign = await request(app)
+        .get('/api/products/target-A/reviews')
+        .set('Authorization', 'Bearer token-B');
+    const missing = await request(app)
+        .get('/api/products/missing/reviews')
+        .set('Authorization', 'Bearer token-B');
+
+    expect(foreign.status).toBe(404);
+    expect(foreign.body).toEqual(missing.body);
+    expect(JSON.stringify(foreign.body)).not.toContain('Private test fixture');
+});
+
+test('user B cannot import reviews or create review records under user A target', async () => {
+    const asin = 'B012345678';
+    db = memoryDb({
+        products: {
+            'target-A': {
+                productId: 'target-A',
+                userId: 'user-A',
+                amazonUrl: `https://www.amazon.com/dp/${asin}`,
+            },
+        },
+        reviews: {
+            existing: {
+                asin,
+                cacheVersion: 'old',
+                text: 'Existing',
+                rating: 3,
+            },
+        },
+        reviewCaches: {
+            [asin]: { asin, version: 'old', reviewCount: 1 },
+        },
+        ingestionRuns: {},
+    });
+    const beforeReviews = db.docs('reviews');
+    const beforeCache = db.docs('reviewCaches');
+    verifyIdToken.mockResolvedValue({ uid: 'user-B' });
+
+    const response = await request(app)
+        .post('/api/products/target-A/import-reviews')
+        .set('Authorization', 'Bearer token-B')
+        .send({ userId: 'user-A', asin });
+
+    expect(response.status).toBe(404);
+    expect(response.body.error.code).toBe('PRODUCT_NOT_FOUND');
+    expect(fetchCanopyReviews).not.toHaveBeenCalled();
+    expect(db.docs('ingestionRuns')).toHaveLength(0);
+    expect(db.docs('reviews')).toEqual(beforeReviews);
+    expect(db.docs('reviewCaches')).toEqual(beforeCache);
+});
+
+test('owner can read reviews and initiate synchronous import', async () => {
+    const asin = 'B012345678';
+    const amazonUrl = `https://www.amazon.com/dp/${asin}`;
+    db = memoryDb({
+        products: {
+            'target-A': { productId: 'target-A', userId: 'user-A', amazonUrl },
+        },
+    });
+    verifyIdToken.mockResolvedValue({ uid: 'user-A' });
+    fetchCanopyReviews.mockResolvedValue([
+        { reviewId: 'source-1', text: 'Owner review', rating: 5 },
+    ]);
+
+    const imported = await request(app)
+        .post('/api/products/target-A/import-reviews')
+        .set('Authorization', 'Bearer token-A');
+    const reviews = await request(app)
+        .get('/api/products/target-A/reviews')
+        .set('Authorization', 'Bearer token-A');
+
+    expect(imported.status).toBe(200);
+    expect(imported.body.data).toMatchObject({ status: 'succeeded' });
+    expect(reviews.status).toBe(200);
+    expect(reviews.body.data).toHaveLength(1);
+    expect(reviews.body.data[0].text).toBe('Owner review');
+});
+
+test('owner can list and retrieve only their target ingestion runs', async () => {
+    db = memoryDb({
+        products: {
+            'target-A': { productId: 'target-A', userId: 'user-A' },
+            'target-B': { productId: 'target-B', userId: 'user-B' },
+        },
+        ingestionRuns: {
+            'run-A': {
+                ingestionRunId: 'run-A',
+                userId: 'user-A',
+                productId: 'target-A',
+                status: 'succeeded',
+            },
+            'run-B': {
+                ingestionRunId: 'run-B',
+                userId: 'user-B',
+                productId: 'target-B',
+                status: 'succeeded',
+            },
+        },
+    });
+    verifyIdToken.mockImplementation(async (token) => ({
+        uid: token === 'token-A' ? 'user-A' : 'user-B',
+    }));
+
+    const list = await request(app)
+        .get('/api/products/target-A/ingestion-runs')
+        .set('Authorization', 'Bearer token-A');
+    const detail = await request(app)
+        .get('/api/products/target-A/ingestion-runs/run-A')
+        .set('Authorization', 'Bearer token-A');
+    const foreign = await request(app)
+        .get('/api/products/target-A/ingestion-runs/run-A')
+        .set('Authorization', 'Bearer token-B');
+
+    expect(list.status).toBe(200);
+    expect(list.body.data).toHaveLength(1);
+    expect(list.body.data[0].ingestionRunId).toBe('run-A');
+    expect(list.body.count).toBe(1);
+    expect(detail.status).toBe(200);
+    expect(detail.body.data.userId).toBe('user-A');
+    expect(foreign.status).toBe(404);
+    expect(foreign.body.error.code).toBe('PRODUCT_NOT_FOUND');
+});
+
+test('ingestion-run routes reject malformed identifiers', async () => {
+    verifyIdToken.mockResolvedValue({ uid: 'user-A' });
+    const badTarget = await request(app)
+        .get('/api/products/bad%2Fid/ingestion-runs')
+        .set('Authorization', 'Bearer token-A');
+    const badRun = await request(app)
+        .get('/api/products/target-A/ingestion-runs/bad%2Fid')
+        .set('Authorization', 'Bearer token-A');
+
+    expect(badTarget.status).toBe(400);
+    expect(badTarget.body.error.code).toBe('VALIDATION_ERROR');
+    expect(badRun.status).toBe(400);
+    expect(badRun.body.error.code).toBe('VALIDATION_ERROR');
 });
 
 test('creates one product owned by the verified user', async () => {
