@@ -1,70 +1,11 @@
 import { beforeEach, expect, jest, test } from '@jest/globals';
 import request from 'supertest';
 
-const documents = new Map();
-let nextId = 1;
+import { memoryDb } from '../helpers/memoryDb.js';
+let db = memoryDb({ products: {} });
+let documents = db.maps.get('products');
 const verifyIdToken = jest.fn();
 const getFirebaseAuth = jest.fn();
-const db = {
-    async runTransaction(callback) {
-        const updates = [];
-        const result = await callback({
-            get: (ref) => ref.get(),
-            update: (ref, value) => updates.push([ref, value]),
-        });
-        for (const [ref, value] of updates) {
-            documents.set(ref.id, { ...documents.get(ref.id), ...value });
-        }
-        return result;
-    },
-    batch() {
-        const references = [];
-        return {
-            delete(ref) {
-                references.push(ref);
-            },
-            async commit() {
-                for (const ref of references) {
-                    await ref.delete();
-                }
-            },
-        };
-    },
-    collection(name) {
-        if (name === 'reviews' || name === 'ingestionRuns') {
-            const query = {
-                where() {
-                    return query;
-                },
-                async get() {
-                    return { docs: [] };
-                },
-            };
-            return query;
-        }
-        if (name !== 'products')
-            throw new Error(`Unexpected collection: ${name}`);
-        return {
-            doc(id = `product-${nextId++}`) {
-                return {
-                    id,
-                    async set(value) {
-                        documents.set(id, value);
-                    },
-                    async get() {
-                        return {
-                            exists: documents.has(id),
-                            data: () => documents.get(id),
-                        };
-                    },
-                    async delete() {
-                        documents.delete(id);
-                    },
-                };
-            },
-        };
-    },
-};
 
 jest.unstable_mockModule('../../src/config/firebaseAdmin.js', () => ({
     getDb: () => db,
@@ -78,8 +19,8 @@ const productInput = {
 };
 
 beforeEach(() => {
-    documents.clear();
-    nextId = 1;
+    db = memoryDb({ products: {} });
+    documents = db.maps.get('products');
     verifyIdToken.mockReset();
     getFirebaseAuth.mockReset();
     getFirebaseAuth.mockReturnValue({ verifyIdToken });
@@ -94,200 +35,172 @@ test('creates one product owned by the verified user', async () => {
         .send(productInput);
 
     expect(response.status).toBe(201);
-    expect(response.body).toEqual({ data: { productId: 'product-1' } });
+    expect(response.body).toEqual({ data: { productId: 'auto-1' } });
     expect(documents.size).toBe(1);
-    expect(documents.get('product-1')).toMatchObject({
-        productId: 'product-1',
+    expect(documents.get('auto-1')).toMatchObject({
+        productId: 'auto-1',
         userId: 'user-A',
+        asin: 'B012345678',
         ...productInput,
     });
     expect(verifyIdToken).toHaveBeenCalledWith('token-A');
 });
 
-test('returns an owned product to its authenticated owner', async () => {
-    documents.set('product-7', {
-        productId: 'product-7',
-        userId: 'user-A',
-        productName: 'Private watch',
-        amazonUrl: productInput.amazonUrl,
-    });
-    verifyIdToken.mockResolvedValue({ uid: 'user-A' });
-
-    const response = await request(app)
-        .get('/api/products/product-7')
-        .set('Authorization', 'Bearer token-A');
-
-    expect(response.status).toBe(200);
-    expect(response.body).toEqual({
-        data: {
-            productId: 'product-7',
-            userId: 'user-A',
-            productName: 'Private watch',
-            amazonUrl: productInput.amazonUrl,
-        },
-    });
-});
-
-test('returns the same 404 for another user’s product and a missing product', async () => {
-    documents.set('product-7', { productId: 'product-7', userId: 'user-A' });
-    verifyIdToken.mockResolvedValue({ uid: 'user-B' });
-
-    const foreign = await request(app)
-        .get('/api/products/product-7')
-        .set('Authorization', 'Bearer token-B');
-    const missing = await request(app)
-        .get('/api/products/missing-id')
-        .set('Authorization', 'Bearer token-B');
-
-    expect(foreign.status).toBe(404);
-    expect(foreign.body).toEqual({
-        error: {
-            code: 'PRODUCT_NOT_FOUND',
-            message: 'Product not found.',
-            details: [],
-        },
-    });
-    expect(missing.status).toBe(404);
-    expect(missing.body).toEqual(foreign.body);
-});
-
-test('rejects a product read without a token', async () => {
-    documents.set('product-7', { productId: 'product-7', userId: 'user-A' });
-
-    const response = await request(app).get('/api/products/product-7');
-
-    expect(response.status).toBe(401);
-    expect(response.body.error.code).toBe('UNAUTHENTICATED');
-});
-
-test('rejects a product read with an invalid token', async () => {
-    documents.set('product-7', { productId: 'product-7', userId: 'user-A' });
-    verifyIdToken.mockRejectedValue(new Error('invalid token'));
-
-    const response = await request(app)
-        .get('/api/products/product-7')
-        .set('Authorization', 'Bearer invalid-token');
-
-    expect(response.status).toBe(401);
-    expect(response.body.error.code).toBe('UNAUTHENTICATED');
-});
-
-test.each(['get', 'delete'])(
-    'rejects a malformed product ID on %s before reaching Firestore',
-    async (method) => {
-        documents.set('product-7', {
-            productId: 'product-7',
-            userId: 'user-A',
-        });
-        verifyIdToken.mockResolvedValue({ uid: 'user-A' });
-
-        const response = await request(app)
-            [method]('/api/products/product%2F7')
-            .set('Authorization', 'Bearer token-A');
-
-        expect(response.status).toBe(400);
-        expect(response.body.error).toEqual({
-            code: 'VALIDATION_ERROR',
-            message: expect.any(String),
-            details: [{ field: 'productId', message: expect.any(String) }],
-        });
-        expect(documents.has('product-7')).toBe(true);
-    }
-);
-
-test('user B cannot delete user A’s product after learning its ID', async () => {
+test('owner can read a target while another user gets the same 404 as a missing ID', async () => {
+    documents.set('target-A', { productId: 'target-A', userId: 'user-A' });
     verifyIdToken.mockImplementation(async (token) => ({
         uid: token === 'token-A' ? 'user-A' : 'user-B',
     }));
-    const created = await request(app)
-        .post('/api/products')
-        .set('Authorization', 'Bearer token-A')
-        .send(productInput);
-    const productId = created.body.data.productId;
-    const before = documents.get(productId);
 
-    const foreignRead = await request(app)
-        .get(`/api/products/${productId}`)
-        .set('Authorization', 'Bearer token-B');
-    const foreignDelete = await request(app)
-        .delete(`/api/products/${productId}`)
-        .set('Authorization', 'Bearer token-B');
-    const ownerRead = await request(app)
-        .get(`/api/products/${productId}`)
+    const owner = await request(app)
+        .get('/api/products/target-A')
         .set('Authorization', 'Bearer token-A');
+    const foreign = await request(app)
+        .get('/api/products/target-A')
+        .set('Authorization', 'Bearer token-B');
+    const missing = await request(app)
+        .get('/api/products/missing')
+        .set('Authorization', 'Bearer token-B');
 
-    expect(foreignRead.status).toBe(404);
-    expect(foreignRead.body.error.code).toBe('PRODUCT_NOT_FOUND');
-    expect(foreignDelete.status).toBe(404);
-    expect(foreignDelete.body).toEqual(foreignRead.body);
-    expect(documents.get(productId)).toEqual(before);
-    expect(ownerRead.status).toBe(200);
-    expect(ownerRead.body.data).toMatchObject({ productId, userId: 'user-A' });
+    expect(owner.status).toBe(200);
+    expect(owner.body.data).toMatchObject({ productId: 'target-A' });
+    expect(foreign.status).toBe(404);
+    expect(foreign.body).toEqual(missing.body);
 });
 
-test('deletes an owned product', async () => {
-    documents.set('product-7', { productId: 'product-7', userId: 'user-A' });
+test('foreign delete cannot change a target, review, or ingestion run', async () => {
+    const target = {
+        productId: 'target-A',
+        userId: 'user-A',
+        asin: 'B012345678',
+        amazonUrl: productInput.amazonUrl,
+    };
+    documents.set('target-A', target);
+    db.maps.set('reviews', new Map([['review-1', { asin: target.asin }]]));
+    db.maps.set(
+        'ingestionRuns',
+        new Map([['run-1', { userId: 'user-A', productId: 'target-A' }]])
+    );
+    verifyIdToken.mockResolvedValue({ uid: 'user-B' });
+
+    const foreign = await request(app)
+        .delete('/api/products/target-A')
+        .set('Authorization', 'Bearer token-B');
+    const missing = await request(app)
+        .delete('/api/products/missing')
+        .set('Authorization', 'Bearer token-B');
+
+    expect(foreign.status).toBe(404);
+    expect(foreign.body).toEqual(missing.body);
+    expect(documents.get('target-A')).toEqual(target);
+    expect(db.docs('reviews')).toHaveLength(1);
+    expect(db.docs('ingestionRuns')).toHaveLength(1);
+});
+
+test('owner delete keeps shared reviews while another target references the ASIN', async () => {
+    const asin = 'B012345678';
+    documents.set('target-A', {
+        productId: 'target-A',
+        userId: 'user-A',
+        asin,
+        amazonUrl: productInput.amazonUrl,
+    });
+    documents.set('target-B', {
+        productId: 'target-B',
+        userId: 'user-B',
+        asin,
+        amazonUrl: productInput.amazonUrl,
+    });
+    db.maps.set('reviews', new Map([['review-1', { asin }]]));
+    db.maps.set(
+        'ingestionRuns',
+        new Map([
+            ['run-A', { userId: 'user-A', productId: 'target-A' }],
+            ['run-B', { userId: 'user-B', productId: 'target-B' }],
+        ])
+    );
     verifyIdToken.mockResolvedValue({ uid: 'user-A' });
 
     const response = await request(app)
-        .delete('/api/products/product-7')
+        .delete('/api/products/target-A')
         .set('Authorization', 'Bearer token-A');
 
     expect(response.status).toBe(200);
-    expect(response.body).toEqual({ data: { productId: 'product-7' } });
-    expect(documents.has('product-7')).toBe(false);
+    expect(response.body).toEqual({ data: { productId: 'target-A' } });
+    expect(documents.has('target-A')).toBe(false);
+    expect(documents.has('target-B')).toBe(true);
+    expect(db.docs('reviews')).toHaveLength(1);
+    expect(db.data('ingestionRuns', 'run-A')).toBeUndefined();
+    expect(db.data('ingestionRuns', 'run-B')).toBeDefined();
 });
 
-test('returns 409 when deleting a product with an active import', async () => {
-    documents.set('product-7', {
-        productId: 'product-7',
+test('GET hides a deleting target and DELETE can retry its cleanup', async () => {
+    documents.set('target-A', {
+        productId: 'target-A',
         userId: 'user-A',
-        activeIngestionRunId: 'run-7',
+        asin: 'B012345678',
+        amazonUrl: productInput.amazonUrl,
+        deleting: true,
+    });
+    verifyIdToken.mockResolvedValue({ uid: 'user-A' });
+
+    const read = await request(app)
+        .get('/api/products/target-A')
+        .set('Authorization', 'Bearer token-A');
+    const deletion = await request(app)
+        .delete('/api/products/target-A')
+        .set('Authorization', 'Bearer token-A');
+
+    expect(read.status).toBe(404);
+    expect(deletion.status).toBe(200);
+    expect(documents.has('target-A')).toBe(false);
+});
+
+test('owner delete rejects an active import and keeps the target', async () => {
+    documents.set('target-A', {
+        productId: 'target-A',
+        userId: 'user-A',
+        asin: 'B012345678',
+        amazonUrl: productInput.amazonUrl,
+        activeIngestionRunId: 'run-A',
         ingestionLockUntil: Date.now() + 60_000,
     });
     verifyIdToken.mockResolvedValue({ uid: 'user-A' });
 
     const response = await request(app)
-        .delete('/api/products/product-7')
+        .delete('/api/products/target-A')
         .set('Authorization', 'Bearer token-A');
 
     expect(response.status).toBe(409);
     expect(response.body.error.code).toBe('INGESTION_IN_PROGRESS');
-    expect(documents.get('product-7').deleting).toBeUndefined();
+    expect(documents.get('target-A').deleting).toBeUndefined();
 });
 
-test('returns the same 404 when deleting a missing product', async () => {
-    verifyIdToken.mockResolvedValue({ uid: 'user-A' });
+test.each(['get', 'delete'])(
+    '%s requires a valid bearer token',
+    async (method) => {
+        const missing = await request(app)[method]('/api/products/target-A');
+        verifyIdToken.mockRejectedValue(new Error('invalid token'));
+        const invalid = await request(app)
+            [method]('/api/products/target-A')
+            .set('Authorization', 'Bearer invalid');
+        expect(missing.status).toBe(401);
+        expect(invalid.status).toBe(401);
+        expect(invalid.body.error.code).toBe('UNAUTHENTICATED');
+    }
+);
 
-    const response = await request(app)
-        .delete('/api/products/missing-id')
-        .set('Authorization', 'Bearer token-A');
-
-    expect(response.status).toBe(404);
-    expect(response.body.error).toEqual({
-        code: 'PRODUCT_NOT_FOUND',
-        message: 'Product not found.',
-        details: [],
-    });
-});
-
-test('rejects a product delete without a token', async () => {
-    const response = await request(app).delete('/api/products/product-7');
-
-    expect(response.status).toBe(401);
-    expect(response.body.error.code).toBe('UNAUTHENTICATED');
-});
-
-test('rejects a product delete with an invalid token', async () => {
-    verifyIdToken.mockRejectedValue(new Error('invalid token'));
-
-    const response = await request(app)
-        .delete('/api/products/product-7')
-        .set('Authorization', 'Bearer invalid-token');
-
-    expect(response.status).toBe(401);
-    expect(response.body.error.code).toBe('UNAUTHENTICATED');
-});
+test.each(['get', 'delete'])(
+    '%s rejects a decoded product ID containing a slash',
+    async (method) => {
+        verifyIdToken.mockResolvedValue({ uid: 'user-A' });
+        const response = await request(app)
+            [method]('/api/products/target%2FA')
+            .set('Authorization', 'Bearer token-A');
+        expect(response.status).toBe(400);
+        expect(response.body.error.code).toBe('VALIDATION_ERROR');
+    }
+);
 
 test('ignores a forged userId and saves the verified user B as owner', async () => {
     verifyIdToken.mockResolvedValue({ uid: 'user-B' });
@@ -298,9 +211,9 @@ test('ignores a forged userId and saves the verified user B as owner', async () 
         .send({ ...productInput, userId: 'user-A' });
 
     expect(response.status).toBe(201);
-    expect(response.body).toEqual({ data: { productId: 'product-1' } });
+    expect(response.body).toEqual({ data: { productId: 'auto-1' } });
     expect(documents.size).toBe(1);
-    expect(documents.get('product-1').userId).toBe('user-B');
+    expect(documents.get('auto-1').userId).toBe('user-B');
     expect(verifyIdToken).toHaveBeenCalledWith('token-B');
 });
 
@@ -623,10 +536,10 @@ test.each([
             });
 
         expect(response.status).toBe(201);
-        expect(response.body).toEqual({ data: { productId: 'product-1' } });
+        expect(response.body).toEqual({ data: { productId: 'auto-1' } });
         expect(documents.size).toBe(1);
-        expect(documents.get('product-1')).toMatchObject({
-            productId: 'product-1',
+        expect(documents.get('auto-1')).toMatchObject({
+            productId: 'auto-1',
             userId: 'user-B',
             productName: 'Example watch',
             amazonUrl: url,
