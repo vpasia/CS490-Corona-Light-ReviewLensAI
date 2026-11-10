@@ -6,7 +6,7 @@ import {
     beforeEach,
     afterEach,
 } from '@jest/globals';
-
+import { memoryDb } from '../helpers/memoryDb.js';
 jest.unstable_mockModule('../../src/config/firebaseAdmin.js', () => ({
     getDb: jest.fn(() => {
         throw new Error('Unexpected live access');
@@ -20,385 +20,400 @@ jest.unstable_mockModule('firebase-admin/firestore', () => ({
 }));
 const { importReviews, getIngestionRun, getIngestionRuns } =
     await import('../../src/services/ingestionService.js');
-const url = 'https://www.amazon.com/dp/B07PRVS98X';
-const valid = {
-    text: ' Actual review ',
+const { getReviews } = await import('../../src/services/reviewService.js');
+const { REVIEW_TTL_MS } = await import('../../src/services/reviewCache.js');
+const url = 'https://www.amazon.com/dp/B07PRVS98X',
+    asin = 'B07PRVS98X';
+const record = {
+    text: ' Great sound ',
     rating: '5',
     sourceReviewId: 'R1',
     userId: 'forged',
+    productId: 'forged',
 };
-
-function fakeDb() {
-    const collections = {
-        products: new Map([
-            ['A', { userId: 'user-A', amazonUrl: url }],
-            ['A2', { userId: 'user-A', amazonUrl: url }],
-            ['B', { userId: 'user-B', amazonUrl: url }],
-        ]),
-        reviews: new Map(),
-        ingestionRuns: new Map(),
-    };
-    let seq = 0;
-    let queue = Promise.resolve();
-    const state = {
-        failSuccess: false,
-        failFailure: false,
-        loseSuccessAck: false,
-    };
-    function snapshot(map, id) {
-        return { exists: map.has(id), data: () => map.get(id) };
-    }
-    const db = {
-        collection(name) {
-            function query(filters = []) {
-                return {
-                    where(field, _operator, value) {
-                        return query([...filters, [field, value]]);
-                    },
-                    async get() {
-                        return {
-                            docs: [...collections[name].entries()]
-                                .filter(([, v]) =>
-                                    filters.every(([f, x]) => v[f] === x)
-                                )
-                                .map(([id, v]) => ({ id, data: () => v })),
-                        };
-                    },
-                };
-            }
-            return {
-                ...query(),
-                doc(id = `id-${++seq}`) {
-                    return {
-                        id,
-                        collectionName: name,
-                        async get() {
-                            return snapshot(collections[name], id);
-                        },
-                    };
-                },
-            };
+const setup = () =>
+    memoryDb({
+        products: {
+            A: { userId: 'a', amazonUrl: url, asin },
+            B: { userId: 'b', amazonUrl: url, asin },
         },
-        runTransaction(callback) {
-            const result = queue.then(async () => {
-                const changes = [];
-                const tx = {
-                    async get(ref) {
-                        if (changes.length) throw new Error('Read after write');
-                        return snapshot(
-                            collections[ref.collectionName],
-                            ref.id
-                        );
-                    },
-                    set(ref, value) {
-                        changes.push([ref, value, false]);
-                    },
-                    update(ref, value) {
-                        changes.push([ref, value, true]);
-                    },
-                };
-                const output = await callback(tx);
-                if (
-                    state.failSuccess &&
-                    changes.some(([, v]) => v.status === 'succeeded')
-                )
-                    throw new Error('secret write failure');
-                if (
-                    state.failFailure &&
-                    changes.some(([, v]) => v.status === 'failed')
-                )
-                    throw new Error('secret status failure');
-                for (const [ref, value, update] of changes) {
-                    const map = collections[ref.collectionName];
-                    if (update && !map.has(ref.id))
-                        throw new Error('Missing update target');
-                    const next = {
-                        ...(update ? map.get(ref.id) : {}),
-                        ...value,
-                    };
-                    for (const key of Object.keys(next))
-                        if (next[key] === 'DELETE_FIELD') delete next[key];
-                    map.set(ref.id, next);
-                }
-                if (
-                    state.loseSuccessAck &&
-                    changes.some(([, v]) => v.status === 'succeeded')
-                ) {
-                    state.loseSuccessAck = false;
-                    throw new Error('Lost commit acknowledgement');
-                }
-                return output;
-            });
-            queue = result.catch(() => {});
-            return result;
-        },
-    };
-    return { db, collections, state };
-}
-let log;
-beforeEach(() => {
-    log = jest.spyOn(console, 'error').mockImplementation(() => {});
-});
-afterEach(() => {
-    log.mockRestore();
-});
-
-describe('owned ingestion coordination and result state', () => {
-    it('runs source retrieval, normalization, atomic persistence and success tracking', async () => {
-        const { db, collections } = fakeDb();
-        const fetchReviews = jest.fn(async (source) => {
-            expect(source).toBe(url);
-            expect([...collections.ingestionRuns.values()][0].status).toBe(
-                'processing'
-            );
-            return [valid, { text: '', rating: 1 }];
-        });
-        const result = await importReviews('user-A', 'A', { db, fetchReviews });
+    });
+describe('shared ASIN ingestion', () => {
+    beforeEach(() => {
+        jest.spyOn(console, 'error').mockImplementation(() => {});
+        jest.spyOn(console, 'warn').mockImplementation(() => {});
+    });
+    afterEach(() => jest.restoreAllMocks());
+    it('publishes normalized shared reviews, expiry and a private successful run atomically', async () => {
+        const db = setup(),
+            fetchReviews = jest.fn(async () => [record, null]);
+        const result = await importReviews('a', 'A', { db, fetchReviews });
         expect(result).toMatchObject({
             status: 'succeeded',
             receivedCount: 2,
             acceptedCount: 1,
             rejectedCount: 1,
             savedCount: 1,
+            reused: false,
+        });
+        const [review] = db.docs('reviews');
+        expect(review).toMatchObject({ text: 'Great sound', rating: 5, asin });
+        expect(review.userId).toBeUndefined();
+        expect(review.productId).toBeUndefined();
+        expect(review.expiresAtMs - review.fetchedAtMs).toBe(REVIEW_TTL_MS);
+        expect(
+            (await getIngestionRun('a', 'A', result.ingestionRunId, db)).status
+        ).toBe('succeeded');
+        expect(db.data('products', 'A').activeIngestionRunId).toBeUndefined();
+    });
+    it('reuses the same fresh generation for another owner without a provider request or expiry extension', async () => {
+        const db = setup(),
+            fetchReviews = jest.fn(async () => [record]);
+        await importReviews('a', 'A', { db, fetchReviews });
+        const cache = db.data('reviewCaches', asin);
+        const result = await importReviews('b', 'B', { db, fetchReviews });
+        expect(result).toMatchObject({
+            reused: true,
+            savedCount: 0,
+            reviewCount: 1,
+            status: 'succeeded',
         });
         expect(fetchReviews).toHaveBeenCalledTimes(1);
-        expect([...collections.reviews.values()][0]).toMatchObject({
-            text: 'Actual review',
-            rating: 5,
-            userId: 'user-A',
-            productId: 'A',
-        });
-        expect(
-            collections.products.get('A').activeIngestionRunId
-        ).toBeUndefined();
-        expect(
-            await getIngestionRun('user-A', 'A', result.ingestionRunId, db)
-        ).toMatchObject(result);
-        expect(await getIngestionRuns('user-A', 'A', db)).toHaveLength(1);
+        expect(db.docs('reviews')).toHaveLength(1);
+        expect(db.data('reviewCaches', asin).expiresAtMs).toBe(
+            cache.expiresAtMs
+        );
+        expect(await getReviews('b', 'B', db)).toHaveLength(1);
+        await expect(
+            getIngestionRun(
+                'b',
+                'B',
+                db.docs('ingestionRuns')[0].ingestionRunId,
+                db
+            )
+        ).rejects.toMatchObject({ code: 'INGESTION_NOT_FOUND' });
     });
-    it.each(['B', 'missing'])(
-        'rejects foreign/missing product %s before any provider call or run write',
-        async (productId) => {
-            const { db, collections } = fakeDb();
-            const fetchReviews = jest.fn();
+    it('deduplicates source IDs and idless content', async () => {
+        const db = setup();
+        const result = await importReviews('a', 'A', {
+            db,
+            fetchReviews: async () => [
+                record,
+                record,
+                { text: 'Other', rating: 3 },
+                { text: 'Other', rating: 3 },
+            ],
+        });
+        expect(result).toMatchObject({ acceptedCount: 4, savedCount: 2 });
+        expect(db.docs('reviews')).toHaveLength(2);
+    });
+    it('rejects a missing, foreign or deleting product before requesting reviews or creating a run', async () => {
+        for (const productId of ['missing', 'B', 'A']) {
+            const db = setup(),
+                fetchReviews = jest.fn();
+            if (productId === 'A')
+                await db
+                    .collection('products')
+                    .doc('A')
+                    .update({ deleting: true });
             await expect(
-                importReviews('user-A', productId, { db, fetchReviews })
-            ).rejects.toMatchObject({ status: 404 });
+                importReviews('a', productId, { db, fetchReviews })
+            ).rejects.toMatchObject({ code: 'PRODUCT_NOT_FOUND' });
             expect(fetchReviews).not.toHaveBeenCalled();
-            expect(collections.ingestionRuns.size).toBe(0);
+            expect(db.docs('ingestionRuns')).toHaveLength(0);
         }
-    );
-    it.each([undefined, '', ' '])(
-        'rejects unusable uid (%s) without database initialization',
-        async (uid) => {
-            await expect(importReviews(uid, 'A')).rejects.toMatchObject({
-                status: 401,
-            });
-            await expect(getIngestionRuns(uid, 'A')).rejects.toMatchObject({
-                status: 401,
-            });
-        }
-    );
-    it.each(['', 'nested/id'])(
-        'rejects invalid product identifier %s',
-        async (id) => {
-            await expect(importReviews('user-A', id)).rejects.toMatchObject({
-                status: 400,
-            });
-        }
-    );
-    it('validates the stored source before starting a provider request', async () => {
-        const { db, collections } = fakeDb();
-        collections.products.set('A', {
-            userId: 'user-A',
-            amazonUrl: 'https://evil.example',
-        });
-        const fetchReviews = jest.fn();
-        await expect(
-            importReviews('user-A', 'A', { db, fetchReviews })
-        ).rejects.toMatchObject({ status: 400 });
-        expect(fetchReviews).not.toHaveBeenCalled();
-        expect(collections.ingestionRuns.size).toBe(0);
     });
-    it.each(
-        [[], [null], [{ text: '', rating: 5 }]].map((records) => [records])
-    )(
-        'records empty/all-invalid result as failure, preserving existing reviews (%j)',
-        async (records) => {
-            const { db, collections } = fakeDb();
-            collections.reviews.set('old', {
-                userId: 'user-A',
-                productId: 'A',
-                text: 'Keep',
-                rating: 4,
-            });
-            await expect(
-                importReviews('user-A', 'A', {
-                    db,
-                    fetchReviews: async () => records,
-                })
-            ).rejects.toMatchObject({ code: 'NO_VALID_REVIEWS' });
-            expect([...collections.ingestionRuns.values()][0]).toMatchObject({
-                status: 'failed',
-                savedCount: 0,
-            });
-            expect(collections.reviews.size).toBe(1);
-        }
-    );
-    it('sanitizes provider failures, records failure and releases the lock', async () => {
-        const { db, collections } = fakeDb();
+    it('blocks a concurrent import from a different target with the same ASIN', async () => {
+        const db = setup();
+        let release, started;
+        const ready = new Promise((resolve) => {
+            started = resolve;
+        });
+        const first = importReviews('a', 'A', {
+            db,
+            fetchReviews: () => {
+                started();
+                return new Promise((resolve) => {
+                    release = resolve;
+                });
+            },
+        });
+        await ready;
+        const second = jest.fn();
         await expect(
-            importReviews('user-A', 'A', {
+            importReviews('b', 'B', { db, fetchReviews: second })
+        ).rejects.toMatchObject({ code: 'INGESTION_IN_PROGRESS' });
+        expect(second).not.toHaveBeenCalled();
+        release([record]);
+        await first;
+    });
+    it('does not replace an expired dataset if the provider fails', async () => {
+        const db = setup();
+        await importReviews('a', 'A', {
+            db,
+            fetchReviews: async () => [record],
+        });
+        const old = db.data('reviewCaches', asin);
+        await db
+            .collection('reviewCaches')
+            .doc(asin)
+            .update({
+                fetchedAtMs: Date.now() - REVIEW_TTL_MS - 1000,
+                expiresAtMs: Date.now() - 1000,
+            });
+        await expect(
+            importReviews('b', 'B', {
                 db,
                 fetchReviews: async () => {
-                    throw Object.assign(new Error('secret-cookie'), {
+                    throw Object.assign(new Error('SECRET'), {
                         code: 'PROVIDER_TIMEOUT',
                     });
                 },
             })
-        ).rejects.toMatchObject({
-            status: 502,
-            code: 'UPSTREAM_PROVIDER_ERROR',
-        });
-        const run = [...collections.ingestionRuns.values()][0];
-        expect(run.status).toBe('failed');
-        expect(JSON.stringify(run)).not.toContain('secret-cookie');
-        expect(JSON.stringify(log.mock.calls)).not.toContain('secret-cookie');
-        expect(
-            collections.products.get('A').activeIngestionRunId
-        ).toBeUndefined();
+        ).rejects.toMatchObject({ code: 'UPSTREAM_PROVIDER_ERROR' });
+        expect(db.data('reviewCaches', asin).version).toBe(old.version);
+        expect(db.docs('reviews')).toHaveLength(1);
+        expect(JSON.stringify(db.docs('ingestionRuns'))).not.toContain(
+            'SECRET'
+        );
     });
-    it('rolls back review writes when the success transaction fails', async () => {
-        const { db, collections, state } = fakeDb();
-        state.failSuccess = true;
-        await expect(
-            importReviews('user-A', 'A', {
-                db,
-                fetchReviews: async () => [valid],
-            })
-        ).rejects.toMatchObject({ status: 500 });
-        expect(collections.reviews.size).toBe(0);
-        expect([...collections.ingestionRuns.values()][0]).toMatchObject({
-            status: 'failed',
-            savedCount: 0,
-        });
-    });
-    it('recognizes a committed success after a lost acknowledgement', async () => {
-        const { db, collections, state } = fakeDb();
-        state.loseSuccessAck = true;
-        const result = await importReviews('user-A', 'A', {
+    it('refreshes at expiry and removes the previous generation only after success', async () => {
+        const db = setup();
+        await importReviews('a', 'A', {
             db,
-            fetchReviews: async () => [valid],
+            fetchReviews: async () => [record],
         });
-        expect(result).toMatchObject({ status: 'succeeded', savedCount: 1 });
-        expect(collections.reviews.size).toBe(1);
+        const past = Date.now() - REVIEW_TTL_MS;
+        await db
+            .collection('reviewCaches')
+            .doc(asin)
+            .update({ fetchedAtMs: past, expiresAtMs: past + REVIEW_TTL_MS });
+        const result = await importReviews('b', 'B', {
+            db,
+            fetchReviews: async () => [{ text: 'Updated', rating: 4 }],
+        });
+        expect(result.reused).toBe(false);
+        expect(db.docs('reviews')).toHaveLength(1);
+        expect(db.docs('reviews')[0].text).toBe('Updated');
     });
-    it('reports unconfirmed state when failure tracking is unavailable', async () => {
-        const { db, collections, state } = fakeDb();
-        state.failFailure = true;
+    it('rejects zero valid reviews and saves a failed run', async () => {
+        const db = setup();
         await expect(
-            importReviews('user-A', 'A', {
+            importReviews('a', 'A', { db, fetchReviews: async () => [null] })
+        ).rejects.toMatchObject({ code: 'NO_VALID_REVIEWS' });
+        expect(db.docs('reviews')).toHaveLength(0);
+        expect(db.docs('ingestionRuns')[0].status).toBe('failed');
+    });
+    it('blocks writes if deletion starts during provider retrieval', async () => {
+        const db = setup();
+        await expect(
+            importReviews('a', 'A', {
                 db,
                 fetchReviews: async () => {
-                    throw new Error('secret');
+                    await db
+                        .collection('products')
+                        .doc('A')
+                        .update({ deleting: true });
+                    return [record];
+                },
+            })
+        ).rejects.toMatchObject({ code: 'PRODUCT_NOT_FOUND' });
+        expect(db.docs('reviews')).toHaveLength(0);
+        expect(db.docs('ingestionRuns')[0].status).toBe('failed');
+    });
+    it('does not recreate products or runs removed during retrieval', async () => {
+        const db = setup();
+        await expect(
+            importReviews('a', 'A', {
+                db,
+                fetchReviews: async () => {
+                    await db.collection('products').doc('A').delete();
+                    for (const run of db.docs('ingestionRuns'))
+                        await db
+                            .collection('ingestionRuns')
+                            .doc(run.ingestionRunId)
+                            .delete();
+                    return [record];
+                },
+            })
+        ).rejects.toMatchObject({ code: 'PRODUCT_NOT_FOUND' });
+        expect(db.data('products', 'A')).toBeUndefined();
+        expect(db.docs('ingestionRuns')).toHaveLength(0);
+    });
+    it('fences a superseded ASIN lease', async () => {
+        const db = setup();
+        await expect(
+            importReviews('a', 'A', {
+                db,
+                fetchReviews: async () => {
+                    await db
+                        .collection('reviewCaches')
+                        .doc(asin)
+                        .update({ activeIngestionRunId: 'new-owner' });
+                    return [record];
+                },
+            })
+        ).rejects.toMatchObject({ code: 'INGESTION_SUPERSEDED' });
+        expect(db.docs('reviews')).toHaveLength(0);
+        expect(db.data('reviewCaches', asin).activeIngestionRunId).toBe(
+            'new-owner'
+        );
+    });
+    it('does not publish partial reviews when the success commit fails', async () => {
+        const db = setup();
+        db.controls.failCommit = (writes) =>
+            writes.some(
+                ([, ref, data]) =>
+                    ref.name === 'ingestionRuns' && data?.status === 'succeeded'
+            );
+        await expect(
+            importReviews('a', 'A', { db, fetchReviews: async () => [record] })
+        ).rejects.toMatchObject({ code: 'INTERNAL_ERROR' });
+        expect(db.docs('reviews')).toHaveLength(0);
+        expect(db.docs('ingestionRuns')[0].status).toBe('failed');
+    });
+    it('recovers an already committed success after a lost acknowledgement', async () => {
+        const db = setup();
+        db.controls.loseSuccessAck = true;
+        expect(
+            (
+                await importReviews('a', 'A', {
+                    db,
+                    fetchReviews: async () => [record],
+                })
+            ).status
+        ).toBe('succeeded');
+        expect(db.docs('reviews')).toHaveLength(1);
+    });
+    it('returns explicit uncertainty when failure-state recording is unavailable', async () => {
+        const db = setup();
+        await expect(
+            importReviews('a', 'A', {
+                db,
+                fetchReviews: async () => {
+                    db.controls.failCommit = () => true;
+                    throw new Error('unavailable');
                 },
             })
         ).rejects.toMatchObject({ code: 'INGESTION_STATE_UNAVAILABLE' });
-        expect([...collections.ingestionRuns.values()][0].status).toBe(
-            'processing'
-        );
     });
-    it('prevents overlapping requests from consuming another provider call', async () => {
-        const { db } = fakeDb();
-        let release;
-        let started;
-        const ready = new Promise((resolve) => {
-            started = resolve;
+    it('lists only the requesting owners runs', async () => {
+        const db = setup();
+        await importReviews('a', 'A', {
+            db,
+            fetchReviews: async () => [record],
         });
-        const fetchReviews = jest.fn(async () => {
-            started();
-            return new Promise((resolve) => {
-                release = resolve;
-            });
+        expect(await getIngestionRuns('a', 'A', db)).toHaveLength(1);
+        await expect(getIngestionRuns('b', 'A', db)).rejects.toMatchObject({
+            code: 'PRODUCT_NOT_FOUND',
         });
-        const first = importReviews('user-A', 'A', { db, fetchReviews });
-        await ready;
-        await expect(
-            importReviews('user-A', 'A', { db, fetchReviews })
-        ).rejects.toMatchObject({ status: 409, code: 'INGESTION_IN_PROGRESS' });
+    });
+    it('recovers a cached success after acknowledgement loss without fetching again', async () => {
+        const db = setup(),
+            fetchReviews = jest.fn(async () => [record]);
+        await importReviews('a', 'A', { db, fetchReviews });
+        db.controls.loseSuccessAck = true;
+        const result = await importReviews('b', 'B', { db, fetchReviews });
+        expect(result.reused).toBe(true);
         expect(fetchReviews).toHaveBeenCalledTimes(1);
-        release([valid]);
-        await first;
     });
-    it('recovers an expired run on the next request', async () => {
-        const { db, collections } = fakeDb();
-        collections.products.set('A', {
-            userId: 'user-A',
-            amazonUrl: url,
-            activeIngestionRunId: 'old',
-            ingestionLockUntil: 1,
-        });
-        collections.ingestionRuns.set('old', {
-            userId: 'user-A',
-            productId: 'A',
+    it('recovers expired ASIN leases and records the interrupted run', async () => {
+        const db = setup();
+        await db
+            .collection('reviewCaches')
+            .doc(asin)
+            .set({ asin, activeIngestionRunId: 'old', ingestionLockUntil: 1 });
+        await db.collection('ingestionRuns').doc('old').set({
+            ingestionRunId: 'old',
+            userId: 'b',
+            productId: 'B',
+            asin,
             status: 'processing',
         });
-        await importReviews('user-A', 'A', {
+        await importReviews('a', 'A', {
             db,
-            fetchReviews: async () => [valid],
+            fetchReviews: async () => [record],
         });
-        expect(collections.ingestionRuns.get('old')).toMatchObject({
+        expect(db.data('ingestionRuns', 'old')).toMatchObject({
             status: 'failed',
             error: { code: 'INGESTION_INTERRUPTED' },
         });
     });
-    it('rechecks ownership after retrieval before persisting reviews', async () => {
-        const { db, collections } = fakeDb();
-        await expect(
-            importReviews('user-A', 'A', {
-                db,
-                fetchReviews: async () => {
-                    collections.products.set('A', {
-                        userId: 'user-B',
-                        amazonUrl: url,
-                    });
-                    return [valid];
-                },
-            })
-        ).rejects.toMatchObject({ status: 404 });
-        expect(collections.reviews.size).toBe(0);
-    });
-    it('rejects oversize normalized collections without partial persistence', async () => {
-        const { db, collections } = fakeDb();
-        await expect(
-            importReviews('user-A', 'A', {
-                db,
-                fetchReviews: async () => Array(401).fill(valid),
-            })
-        ).rejects.toMatchObject({ status: 400 });
-        expect(collections.reviews.size).toBe(0);
-        expect([...collections.ingestionRuns.values()][0].status).toBe(
-            'failed'
-        );
-    });
-    it('does not expose runs through another owner or target', async () => {
-        const { db, collections } = fakeDb();
-        const result = await importReviews('user-A', 'A', {
+    it('does not bypass an incomplete cache and pretend it was reused', async () => {
+        const db = setup();
+        await importReviews('a', 'A', {
             db,
-            fetchReviews: async () => [valid],
+            fetchReviews: async () => [record],
         });
+        await db
+            .collection('reviews')
+            .doc(db.docs('reviews')[0].reviewId)
+            .delete();
+        const fetchReviews = jest.fn(async () => [record]);
+        expect(
+            (await importReviews('b', 'B', { db, fetchReviews })).reused
+        ).toBe(false);
+        expect(fetchReviews).toHaveBeenCalledTimes(1);
+    });
+    it('rejects batches exceeding the supported review limit without publishing', async () => {
+        const db = setup();
         await expect(
-            getIngestionRun('user-B', 'A', result.ingestionRunId, db)
-        ).rejects.toMatchObject({ status: 404 });
-        await expect(
-            getIngestionRun('user-A', 'A2', result.ingestionRunId, db)
-        ).rejects.toMatchObject({ status: 404 });
-        expect(await getIngestionRuns('user-A', 'A2', db)).toEqual([]);
-        collections.ingestionRuns.set('foreign', {
-            userId: 'user-B',
-            productId: 'A',
-            status: 'failed',
+            importReviews('a', 'A', {
+                db,
+                fetchReviews: async () =>
+                    Array.from({ length: 401 }, (_, i) => ({
+                        ...record,
+                        sourceReviewId: `R${i}`,
+                    })),
+            })
+        ).rejects.toMatchObject({ code: 'VALIDATION_ERROR' });
+        expect(db.docs('reviews')).toHaveLength(0);
+    });
+    it('records success even if cleanup of the obsolete generation must be retried later', async () => {
+        const db = setup();
+        await importReviews('a', 'A', {
+            db,
+            fetchReviews: async () => [record],
         });
-        expect(await getIngestionRuns('user-A', 'A', db)).toHaveLength(1);
+        await db
+            .collection('reviewCaches')
+            .doc(asin)
+            .update({ expiresAtMs: 0 });
+        db.controls.failBatch = true;
+        expect(
+            (
+                await importReviews('b', 'B', {
+                    db,
+                    fetchReviews: async () => [{ text: 'Updated', rating: 4 }],
+                })
+            ).status
+        ).toBe('succeeded');
+        expect((await getReviews('b', 'B', db))[0].text).toBe('Updated');
+    });
+    it('keeps cleanup locks intact when import is attempted during last-reference deletion', async () => {
+        const db = setup();
+        await db
+            .collection('reviewCaches')
+            .doc(asin)
+            .set({ deleting: true, cleanupProductId: 'other' });
+        const fetchReviews = jest.fn();
+        await expect(
+            importReviews('a', 'A', { db, fetchReviews })
+        ).rejects.toMatchObject({ code: 'REVIEW_CACHE_BUSY' });
+        expect(fetchReviews).not.toHaveBeenCalled();
+        expect(db.docs('ingestionRuns')).toHaveLength(0);
+    });
+    it('publishes a supported 400-review dataset with matching counts', async () => {
+        const db = setup();
+        const result = await importReviews('a', 'A', {
+            db,
+            fetchReviews: async () =>
+                Array.from({ length: 400 }, (_, i) => ({
+                    ...record,
+                    sourceReviewId: `R${i}`,
+                })),
+        });
+        expect(result.savedCount).toBe(400);
+        expect(await getReviews('a', 'A', db)).toHaveLength(400);
     });
 });

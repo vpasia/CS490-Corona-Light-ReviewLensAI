@@ -6,37 +6,8 @@ function failure(code, message, status = 502) {
     return new AppError(status, code, message);
 }
 
-// US Amazon product URLs only. Never fetch a user-supplied host directly.
-export function parseAmazonSource(sourceUrl) {
-    let url;
-    try {
-        url = new URL(sourceUrl);
-    } catch {
-        throw failure(
-            'INVALID_AMAZON_URL',
-            'Enter a full Amazon product URL.',
-            400
-        );
-    }
-    const match = url.pathname.match(
-        /^\/(?:[^/]+\/)?(?:dp|gp\/product)\/([A-Z0-9]{10})(?:\/|$)/i
-    );
-    if (
-        url.protocol !== 'https:' ||
-        !['amazon.com', 'www.amazon.com'].includes(url.hostname) ||
-        url.username ||
-        url.password ||
-        url.port ||
-        !match
-    ) {
-        throw failure(
-            'INVALID_AMAZON_URL',
-            'Use an https://www.amazon.com/dp/ product link.',
-            400
-        );
-    }
-    return { asin: match[1].toUpperCase(), domain: 'US' };
-}
+import { parseAmazonSource } from '../utils/amazonSource.js';
+export { parseAmazonSource } from '../utils/amazonSource.js';
 
 // Shape verified against Canopy's official top-reviews documentation.
 export function mapCanopyReviews(payload) {

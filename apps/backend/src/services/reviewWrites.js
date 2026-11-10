@@ -25,16 +25,24 @@ export function prepareReviewRecords(records) {
     return reviews;
 }
 
-// Internal write helper. Caller MUST verify ownership before staging writes.
-// writer can be a batch or transaction; it is committed only by the caller.
-export function stageReviewWrites(writer, database, uid, productId, reviews) {
+// Internal helper: callers validate ownership and fence the ASIN cache in a transaction.
+export function stageReviewWrites(
+    writer,
+    database,
+    asin,
+    version,
+    reviews,
+    fetchedAtMs
+) {
     return reviews.map((review) => {
         const ref = database.collection('reviews').doc();
         writer.set(ref, {
             ...review,
             reviewId: ref.id,
-            userId: uid,
-            productId,
+            asin,
+            cacheVersion: version,
+            fetchedAtMs,
+            expiresAtMs: fetchedAtMs + 14 * 24 * 60 * 60 * 1000,
             createdAt: FieldValue.serverTimestamp(),
         });
         return ref.id;

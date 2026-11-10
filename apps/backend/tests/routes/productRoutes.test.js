@@ -1,27 +1,11 @@
 import { beforeEach, expect, jest, test } from '@jest/globals';
 import request from 'supertest';
 
-const documents = new Map();
-let nextId = 1;
+import { memoryDb } from '../helpers/memoryDb.js';
+let db = memoryDb({ products: {} });
+let documents = db.maps.get('products');
 const verifyIdToken = jest.fn();
 const getFirebaseAuth = jest.fn();
-const db = {
-    collection(name) {
-        if (name !== 'products')
-            throw new Error(`Unexpected collection: ${name}`);
-        return {
-            doc() {
-                const id = `product-${nextId++}`;
-                return {
-                    id,
-                    async set(value) {
-                        documents.set(id, value);
-                    },
-                };
-            },
-        };
-    },
-};
 
 jest.unstable_mockModule('../../src/config/firebaseAdmin.js', () => ({
     getDb: () => db,
@@ -35,8 +19,8 @@ const productInput = {
 };
 
 beforeEach(() => {
-    documents.clear();
-    nextId = 1;
+    db = memoryDb({ products: {} });
+    documents = db.maps.get('products');
     verifyIdToken.mockReset();
     getFirebaseAuth.mockReset();
     getFirebaseAuth.mockReturnValue({ verifyIdToken });
@@ -51,11 +35,12 @@ test('creates one product owned by the verified user', async () => {
         .send(productInput);
 
     expect(response.status).toBe(201);
-    expect(response.body).toEqual({ data: { productId: 'product-1' } });
+    expect(response.body).toEqual({ data: { productId: 'auto-1' } });
     expect(documents.size).toBe(1);
-    expect(documents.get('product-1')).toMatchObject({
-        productId: 'product-1',
+    expect(documents.get('auto-1')).toMatchObject({
+        productId: 'auto-1',
         userId: 'user-A',
+        asin: 'B012345678',
         ...productInput,
     });
     expect(verifyIdToken).toHaveBeenCalledWith('token-A');
@@ -70,9 +55,9 @@ test('ignores a forged userId and saves the verified user B as owner', async () 
         .send({ ...productInput, userId: 'user-A' });
 
     expect(response.status).toBe(201);
-    expect(response.body).toEqual({ data: { productId: 'product-1' } });
+    expect(response.body).toEqual({ data: { productId: 'auto-1' } });
     expect(documents.size).toBe(1);
-    expect(documents.get('product-1').userId).toBe('user-B');
+    expect(documents.get('auto-1').userId).toBe('user-B');
     expect(verifyIdToken).toHaveBeenCalledWith('token-B');
 });
 
@@ -395,10 +380,10 @@ test.each([
             });
 
         expect(response.status).toBe(201);
-        expect(response.body).toEqual({ data: { productId: 'product-1' } });
+        expect(response.body).toEqual({ data: { productId: 'auto-1' } });
         expect(documents.size).toBe(1);
-        expect(documents.get('product-1')).toMatchObject({
-            productId: 'product-1',
+        expect(documents.get('auto-1')).toMatchObject({
+            productId: 'auto-1',
             userId: 'user-B',
             productName: 'Example watch',
             amazonUrl: url,

@@ -1,3 +1,5 @@
+> **Shared-ASIN revision:** The schema, persistence and cache behavior below are historical. Use [S1-019-023-shared-asin.md](S1-019-023-shared-asin.md) for the updated #36 contract. The previous live test validated the earlier implementation; the ASIN revision still needs its own live smoke test.
+
 # S1-020: Canopy Review Extraction
 
 ## Implemented scope

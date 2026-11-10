@@ -1,7 +1,6 @@
 import { AppError } from '../utils/AppError.js';
 
-const AMAZON_HOSTS = new Set(['amazon.com', 'www.amazon.com']);
-const PRODUCT_PATH_PATTERN = /\/(?:dp|gp\/product)\/[a-z0-9]{10}(?:[/?]|$)/i;
+import { parseAmazonSource } from '../utils/amazonSource.js';
 
 // URL parsing can silently strip control characters, so reject them in the original input.
 function hasAsciiControlCharacters(value) {
@@ -15,31 +14,20 @@ function hasAsciiControlCharacters(value) {
 }
 
 function isAmazonProductUrl(value) {
-    if (hasAsciiControlCharacters(value)) {
-        return false;
-    }
-
-    let url;
     try {
-        url = new URL(value);
+        parseAmazonSource(value);
+        return true;
     } catch {
         return false;
     }
-    return (
-        url.protocol === 'https:' &&
-        AMAZON_HOSTS.has(url.hostname) &&
-        !url.username &&
-        !url.password &&
-        !url.port &&
-        PRODUCT_PATH_PATTERN.test(url.pathname)
-    );
 }
 
 export function validateProductInput(req, _res, next) {
     const details = [];
     const productName = req.body?.productName;
     const amazonUrl = req.body?.amazonUrl;
-    const trimmedName = typeof productName === 'string' ? productName.trim() : '';
+    const trimmedName =
+        typeof productName === 'string' ? productName.trim() : '';
     const trimmedUrl = typeof amazonUrl === 'string' ? amazonUrl.trim() : '';
 
     if (!trimmedName) {
@@ -59,7 +47,10 @@ export function validateProductInput(req, _res, next) {
             field: 'amazonUrl',
             message: 'Enter an Amazon product link.',
         });
-    } else if (hasAsciiControlCharacters(amazonUrl) ||!isAmazonProductUrl(trimmedUrl)) {
+    } else if (
+        hasAsciiControlCharacters(amazonUrl) ||
+        !isAmazonProductUrl(trimmedUrl)
+    ) {
         details.push({
             field: 'amazonUrl',
             message:

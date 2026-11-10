@@ -1,246 +1,98 @@
-import { describe, it, expect, jest } from '@jest/globals';
-
+import { jest, describe, it, expect } from '@jest/globals';
+import { memoryDb } from '../helpers/memoryDb.js';
 jest.unstable_mockModule('../../src/config/firebaseAdmin.js', () => ({
-    getDb: jest.fn(() => {
-        throw new Error('Unexpected live database access');
-    }),
+    getDb: () => {
+        throw new Error('Unexpected live access');
+    },
 }));
-// Keep these tests completely isolated from Firebase SDK initialization.
 jest.unstable_mockModule('firebase-admin/firestore', () => ({
-    FieldValue: { serverTimestamp: () => 'SERVER_TIMESTAMP' },
+    FieldValue: {
+        serverTimestamp: () => 'SERVER_TIME',
+        delete: () => 'DELETE_FIELD',
+    },
 }));
-const { saveReviews, getReviews } =
+const { getReviews, saveReviews } =
     await import('../../src/services/reviewService.js');
-
-function fakeFirestore() {
-    const products = new Map([
-        ['product-A', { userId: 'user-A' }],
-        ['product-A2', { userId: 'user-A' }],
-        ['product-B', { userId: 'user-B' }],
-    ]);
-    const reviews = new Map();
-    let sequence = 0;
-    const state = { commits: 0, reviewReads: 0, failCommit: false };
-    const db = {
-        collection(name) {
-            if (name === 'products')
-                return {
-                    doc(id) {
-                        return {
-                            async get() {
-                                return {
-                                    exists: products.has(id),
-                                    data: () => products.get(id),
-                                };
-                            },
-                        };
-                    },
-                };
-            if (name !== 'reviews') throw new Error('Unexpected collection');
-            function query(filters = []) {
-                return {
-                    where(field, operator, value) {
-                        expect(operator).toBe('==');
-                        return query([...filters, [field, value]]);
-                    },
-                    async get() {
-                        state.reviewReads++;
-                        return {
-                            docs: [...reviews.entries()]
-                                .filter(([, value]) =>
-                                    filters.every(
-                                        ([key, expected]) =>
-                                            value[key] === expected
-                                    )
-                                )
-                                .map(([id, value]) => ({
-                                    id,
-                                    data: () => value,
-                                })),
-                        };
-                    },
-                };
-            }
-            return { ...query(), doc: () => ({ id: `review-${++sequence}` }) };
+const { REVIEW_TTL_MS } = await import('../../src/services/reviewCache.js');
+const asin = 'B07PRVS98X',
+    url = `https://www.amazon.com/dp/${asin}`;
+function setup() {
+    const now = Date.now();
+    return memoryDb({
+        products: {
+            A: { userId: 'a', amazonUrl: url, asin },
+            B: { userId: 'b', amazonUrl: url, asin },
         },
-        batch() {
-            const pending = [];
-            return {
-                set(ref, value) {
-                    pending.push([ref.id, value]);
-                },
-                async commit() {
-                    state.commits++;
-                    if (state.failCommit)
-                        throw new Error('Database unavailable');
-                    for (const [id, value] of pending) reviews.set(id, value);
-                },
-            };
+        reviewCaches: {
+            [asin]: {
+                asin,
+                version: 'v1',
+                fetchedAtMs: now,
+                expiresAtMs: now + REVIEW_TTL_MS,
+                reviewCount: 1,
+            },
         },
-    };
-    return { db, products, reviews, state };
+        reviews: {
+            R1: {
+                asin,
+                cacheVersion: 'v1',
+                text: 'Shared public review',
+                rating: 4,
+            },
+            R2: {
+                asin,
+                cacheVersion: 'old',
+                text: 'Old generation',
+                rating: 3,
+            },
+        },
+    });
 }
-const validReview = {
-    text: 'Good sound.',
-    rating: 5,
-    sourceReviewId: 'source-1',
-};
-
-describe('owned review persistence', () => {
-    it('saves and retrieves normalized fields with backend ownership and IDs', async () => {
-        const { db, reviews } = fakeFirestore();
-        const result = await saveReviews(
-            'user-A',
-            'product-A',
-            [validReview],
-            db
+describe('owned access to shared reviews', () => {
+    it('returns only the published generation to either legitimate owner', async () => {
+        const db = setup();
+        expect(await getReviews('a', 'A', db)).toEqual(
+            await getReviews('b', 'B', db)
         );
-        expect(result).toEqual({ reviewIds: ['review-1'], count: 1 });
-        expect(reviews.get('review-1')).toEqual({
-            ...validReview,
-            reviewId: 'review-1',
-            userId: 'user-A',
-            productId: 'product-A',
-            createdAt: 'SERVER_TIMESTAMP',
-        });
-        expect(await getReviews('user-A', 'product-A', db)).toEqual([
-            reviews.get('review-1'),
-        ]);
+        expect(await getReviews('a', 'A', db)).toHaveLength(1);
     });
-    it('strips forged ownership, IDs, timestamps and unsupported fields', async () => {
-        const { db, reviews } = fakeFirestore();
-        await saveReviews(
-            'user-A',
-            'product-A',
-            [
-                {
-                    ...validReview,
-                    userId: 'user-B',
-                    productId: 'product-B',
-                    reviewId: 'forged',
-                    createdAt: 'forged',
-                    secret: 'discard',
-                },
-            ],
-            db
-        );
-        expect(reviews.get('review-1')).toEqual({
-            ...validReview,
-            reviewId: 'review-1',
-            userId: 'user-A',
-            productId: 'product-A',
-            createdAt: 'SERVER_TIMESTAMP',
-        });
-    });
-    it('keeps two targets owned by the same user separate', async () => {
-        const { db } = fakeFirestore();
-        await saveReviews('user-A', 'product-A', [validReview], db);
-        await saveReviews(
-            'user-A',
-            'product-A2',
-            [{ text: 'Other product.', rating: 2 }],
-            db
-        );
-        const list = await getReviews('user-A', 'product-A2', db);
-        expect(list).toHaveLength(1);
-        expect(list[0].text).toBe('Other product.');
-        expect(list[0].productId).toBe('product-A2');
-    });
-    it('filters children by both owner and product, even if a child has an incorrect link', async () => {
-        const { db, reviews } = fakeFirestore();
-        await saveReviews('user-A', 'product-A', [validReview], db);
-        reviews.set('foreign', {
-            text: 'Private',
-            rating: 1,
-            userId: 'user-B',
-            productId: 'product-A',
-        });
-        const list = await getReviews('user-A', 'product-A', db);
-        expect(list).toHaveLength(1);
-        expect(list[0].userId).toBe('user-A');
-    });
-    it.each(['product-A', 'missing-product'])(
-        'returns 404 for foreign/missing target %s before any review access',
-        async (id) => {
-            const { db, state, reviews } = fakeFirestore();
-            await expect(
-                saveReviews('user-B', id, [validReview], db)
-            ).rejects.toMatchObject({ status: 404, code: 'PRODUCT_NOT_FOUND' });
-            await expect(getReviews('user-B', id, db)).rejects.toMatchObject({
-                status: 404,
+    it('hides foreign, missing and deleting targets', async () => {
+        const db = setup();
+        for (const id of ['B', 'missing'])
+            await expect(getReviews('a', id, db)).rejects.toMatchObject({
                 code: 'PRODUCT_NOT_FOUND',
             });
-            expect(state.commits).toBe(0);
-            expect(state.reviewReads).toBe(0);
-            expect(reviews.size).toBe(0);
-        }
-    );
-    it.each([undefined, '', ' '])(
-        'rejects absent identity (%s) without initializing Firebase',
-        async (uid) => {
-            await expect(
-                saveReviews(uid, 'product-A', [validReview])
-            ).rejects.toMatchObject({ status: 401 });
-            await expect(getReviews(uid, 'product-A')).rejects.toMatchObject({
-                status: 401,
-            });
-        }
-    );
-    it.each([undefined, '', 'nested/product'])(
-        'rejects invalid product ID (%s)',
-        async (id) => {
-            await expect(
-                saveReviews('user-A', id, [validReview])
-            ).rejects.toMatchObject({ status: 400 });
-            await expect(getReviews('user-A', id)).rejects.toMatchObject({
-                status: 400,
-            });
-        }
-    );
-    it.each(
-        [
-            null,
-            {},
-            [null],
-            [validReview, { text: '', rating: 5 }],
-            [{ text: 'Bad', rating: 6 }],
-        ].map((records) => [records])
-    )(
-        'rejects malformed input without partial writes (%j)',
-        async (records) => {
-            const { db, state, reviews } = fakeFirestore();
-            await expect(
-                saveReviews('user-A', 'product-A', records, db)
-            ).rejects.toMatchObject({ status: 400, code: 'VALIDATION_ERROR' });
-            expect(state.commits).toBe(0);
-            expect(reviews.size).toBe(0);
-        }
-    );
-    it('handles empty input and results while still checking ownership', async () => {
-        const { db, state } = fakeFirestore();
-        expect(await saveReviews('user-A', 'product-A', [], db)).toEqual({
-            reviewIds: [],
-            count: 0,
+        await db.collection('products').doc('A').update({ deleting: true });
+        await expect(getReviews('a', 'A', db)).rejects.toMatchObject({
+            code: 'PRODUCT_NOT_FOUND',
         });
-        expect(await getReviews('user-A', 'product-A', db)).toEqual([]);
-        await expect(
-            saveReviews('user-B', 'product-A', [], db)
-        ).rejects.toMatchObject({ status: 404 });
-        expect(state.commits).toBe(0);
     });
-    it('rejects oversized batches before writing', async () => {
-        const { db, state } = fakeFirestore();
-        await expect(
-            saveReviews('user-A', 'product-A', Array(401).fill(validReview), db)
-        ).rejects.toMatchObject({ status: 400 });
-        expect(state.commits).toBe(0);
+    it('returns no stale cache as fresh data', async () => {
+        const db = setup();
+        await db
+            .collection('reviewCaches')
+            .doc(asin)
+            .update({ expiresAtMs: 0 });
+        expect(await getReviews('a', 'A', db)).toEqual([]);
     });
-    it('propagates commit failure instead of returning a successful save count', async () => {
-        const { db, state, reviews } = fakeFirestore();
-        state.failCommit = true;
-        await expect(
-            saveReviews('user-A', 'product-A', [validReview], db)
-        ).rejects.toThrow('Database unavailable');
-        expect(reviews.size).toBe(0);
+    it('reports an incomplete cache instead of pretending import succeeded', async () => {
+        const db = setup();
+        await db.collection('reviews').doc('R1').delete();
+        await expect(getReviews('a', 'A', db)).rejects.toMatchObject({
+            code: 'REVIEW_CACHE_INCOMPLETE',
+        });
+    });
+    it('validates identity before database resolution', async () => {
+        await expect(getReviews('', 'A')).rejects.toMatchObject({
+            code: 'UNAUTHENTICATED',
+        });
+        await expect(getReviews('a', 'bad/id')).rejects.toMatchObject({
+            code: 'VALIDATION_ERROR',
+        });
+    });
+    it('prevents obsolete direct saves from bypassing atomic cache publication', async () => {
+        await expect(saveReviews('a', 'A', [])).rejects.toMatchObject({
+            code: 'USE_INGESTION_SERVICE',
+        });
     });
 });
