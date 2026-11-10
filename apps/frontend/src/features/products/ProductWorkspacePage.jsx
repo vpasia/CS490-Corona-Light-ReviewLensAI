@@ -6,8 +6,10 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { ApiError } from '@/lib/api.js';
 
 import ImportReviewsPanel from './ImportReviewsPanel.jsx';
+import SavedReviewsList from './SavedReviewsList.jsx';
 import { useImportReviews } from './useImportReviews.js';
 import { useProduct } from './useProduct.js';
+import { useReviews } from './useReviews.js';
 
 const PLATFORM_LABELS = { amazon: 'Amazon' };
 const LOAD_ERROR_MESSAGE = 'We couldn’t load this product right now. Please try again.';
@@ -23,6 +25,13 @@ function BackLink() {
 function ProductWorkspace({ productId }) {
   const { status, product, error, retry } = useProduct(productId);
   const importer = useImportReviews(productId);
+  const reviews = useReviews(productId);
+
+  async function handleImport() {
+    if (await importer.start()) {
+      reviews.reload();
+    }
+  }
 
   if (status === 'loading') {
     return (
@@ -92,7 +101,14 @@ function ProductWorkspace({ productId }) {
         reused={importer.reused}
         reviewCount={importer.reviewCount}
         errorMessage={importer.errorMessage}
-        onImport={importer.start}
+        onImport={handleImport}
+      />
+
+      <SavedReviewsList
+        status={reviews.status}
+        reviews={reviews.reviews}
+        errorMessage={reviews.errorMessage}
+        onRetry={reviews.reload}
       />
     </main>
   );
