@@ -40,4 +40,8 @@ A teammate asked that deletion coordinate with active imports and clean up inges
 
 The team subsequently confirmed that there is no `analyses` collection. Its deletion query and test fixtures were removed, and the engineering and security standards were updated to describe the current collections.
 
-PR #36 is still separate. Its import admission and completion transactions must reject a product with `deleting: true` before writing a new run or reviews. Because those transactions also read and update the product document, this guard closes the race between import and deletion when the branches are integrated. Until that counterpart is merged, the deletion marker alone cannot stop a new import from starting after deletion begins.
+## Integration after PR #36 merged
+
+Merged main supplies the authoritative deletion service. It checks ownership, rejects an active import, removes the owner's ingestion runs, and coordinates shared reviews by ASIN so another target can retain them. Its import transactions also reject targets marked `deleting`. Ticket 12 retains the GET and DELETE routes, controller handlers, and product-ID validation. The route tests now use PR #36's shared `memoryDb` helper and cover two authenticated identities, unchanged data after a foreign DELETE, active imports, and deletion retry. The old per-user review deletion service and test fixtures were removed during conflict resolution.
+
+The merge is left uncommitted for the developer. Unrelated local doc and frontend environment edits remain outside the staged merge result.
