@@ -1,4 +1,8 @@
-import { createProduct, deleteProduct } from '../services/productService.js';
+import {
+    createProduct,
+    deleteProduct,
+    listProducts,
+} from '../services/productService.js';
 import { getOwnedProduct } from '../services/ownership.js';
 
 export async function addProduct(req, res) {
@@ -17,4 +21,13 @@ export async function getProduct(req, res) {
 export async function removeProduct(req, res) {
     const productId = await deleteProduct(req.user.uid, req.params.productId);
     res.status(200).json({ data: { productId } });
+}
+
+export async function getProducts(req, res) {
+    const products = await listProducts(req.user.uid);
+    res.status(200).json({
+        data: products,
+        nextCursor: null,
+        count: products.length,
+    });
 }
