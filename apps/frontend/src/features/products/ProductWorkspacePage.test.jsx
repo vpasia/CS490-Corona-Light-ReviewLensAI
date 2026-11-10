@@ -6,7 +6,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { ApiError } from '@/lib/api.js';
 
 import ProductWorkspacePage from './ProductWorkspacePage.jsx';
-import { getProduct, importReviews } from './productsApi.js';
+import { getProduct, importReviews, listReviews } from './productsApi.js';
 
 vi.mock('@/lib/firebase.js', () => ({ auth: {} }));
 vi.mock('firebase/auth', () => ({ signOut: vi.fn() }));
@@ -18,6 +18,7 @@ const product = {
   platform: 'amazon',
   amazonUrl: 'https://www.amazon.com/dp/B0ABCDEF12',
 };
+const savedReview = { reviewId: 'r1', text: 'Sound is crisp', rating: 4 };
 
 function renderWorkspace() {
   return render(
@@ -33,6 +34,7 @@ function renderWorkspace() {
 describe('ProductWorkspacePage', () => {
   beforeEach(() => {
     vi.resetAllMocks();
+    listReviews.mockResolvedValue([]);
   });
 
   it('shows loading placeholders while the product loads', () => {
@@ -167,5 +169,62 @@ describe('ProductWorkspacePage', () => {
     await user.click(await screen.findByRole('button', { name: 'Import reviews' }));
 
     expect(await screen.findByText('Using cached reviews.')).toBeInTheDocument();
+  });
+
+  it('shows reviews saved earlier without importing again', async () => {
+    getProduct.mockResolvedValue(product);
+    listReviews.mockResolvedValue([savedReview]);
+    renderWorkspace();
+
+    expect(await screen.findByText('Sound is crisp')).toBeInTheDocument();
+    expect(screen.getByRole('img', { name: 'Rated 4 out of 5' })).toBeInTheDocument();
+    expect(listReviews).toHaveBeenCalledWith('p1');
+    expect(importReviews).not.toHaveBeenCalled();
+  });
+
+  it('refreshes the saved reviews after a successful import', async () => {
+    getProduct.mockResolvedValue(product);
+    listReviews.mockResolvedValueOnce([]).mockResolvedValueOnce([savedReview]);
+    importReviews.mockResolvedValue({ savedCount: 1 });
+    const user = userEvent.setup();
+    renderWorkspace();
+
+    expect(await screen.findByText('No reviews imported')).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Import reviews' }));
+
+    expect(await screen.findByText('Sound is crisp')).toBeInTheDocument();
+    expect(listReviews).toHaveBeenCalledTimes(2);
+  });
+
+  it('keeps the saved reviews when an import fails', async () => {
+    getProduct.mockResolvedValue(product);
+    listReviews.mockResolvedValue([savedReview]);
+    importReviews.mockRejectedValue(
+      new ApiError({
+        status: 409,
+        code: 'INGESTION_IN_PROGRESS',
+        message: 'An import is already running for this product.',
+      }),
+    );
+    const user = userEvent.setup();
+    renderWorkspace();
+
+    expect(await screen.findByText('Sound is crisp')).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Import reviews' }));
+
+    expect(
+      await screen.findByText('An import is already running for this product.'),
+    ).toBeInTheDocument();
+    expect(screen.getByText('Sound is crisp')).toBeInTheDocument();
+    expect(listReviews).toHaveBeenCalledTimes(1);
+  });
+
+  it('only loads reviews for the product being viewed', async () => {
+    getProduct.mockResolvedValue(product);
+    listReviews.mockResolvedValue([savedReview]);
+    renderWorkspace();
+
+    await screen.findByText('Sound is crisp');
+    expect(listReviews.mock.calls).toEqual([['p1']]);
   });
 });

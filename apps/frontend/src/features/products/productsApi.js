@@ -18,6 +18,11 @@ export async function getProduct(productId) {
   return response?.data ?? null;
 }
 
+export async function listReviews(productId) {
+  const response = await apiRequest(`/api/products/${encodeURIComponent(productId)}/reviews`);
+  return response?.data ?? [];
+}
+
 export async function importReviews(productId) {
   const response = await apiRequest(
     `/api/products/${encodeURIComponent(productId)}/import-reviews`,

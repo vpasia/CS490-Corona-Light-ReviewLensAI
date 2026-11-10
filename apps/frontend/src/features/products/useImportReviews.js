@@ -32,12 +32,14 @@ export function useImportReviews(productId) {
         reused: result?.reused === true,
         reviewCount: toCount(result?.reviewCount),
       });
+      return true;
     } catch (error) {
       setState({
         ...IDLE_STATE,
         status: 'error',
         errorMessage: error instanceof ApiError ? error.message : IMPORT_ERROR_MESSAGE,
       });
+      return false;
     }
   }, [productId]);
 
