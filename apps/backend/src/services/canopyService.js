@@ -1,6 +1,11 @@
 import { AppError } from '../utils/AppError.js';
+import { normalizeReviews } from './reviewNormalizer.js';
+import { deduplicateReviews } from './reviewCache.js';
 
-const ENDPOINT = 'https://rest.canopyapi.co/api/amazon/product/top-reviews';
+const ENDPOINT = 'https://rest.canopyapi.co/api/amazon/product/reviews';
+export const MIN_USABLE_REVIEWS = 15;
+export const MAX_REVIEW_PAGES = 10;
+export const TOTAL_TIMEOUT_MS = 120000;
 
 function failure(code, message, status = 502) {
     return new AppError(status, code, message);
@@ -9,33 +14,42 @@ function failure(code, message, status = 502) {
 import { parseAmazonSource } from '../utils/amazonSource.js';
 export { parseAmazonSource } from '../utils/amazonSource.js';
 
-// Shape verified against Canopy's official top-reviews documentation.
-export function mapCanopyReviews(payload) {
+// Shape verified against Canopy's OpenAPI spec (GET /api/amazon/product/reviews).
+export function mapCanopyReviewPage(payload) {
     if (payload?.errors?.length) {
         throw failure(
             'UPSTREAM_PROVIDER_ERROR',
             'The review provider could not complete the request.'
         );
     }
-    const records = payload?.data?.amazonProduct?.topReviews;
+    const paginated = payload?.data?.amazonProduct?.reviewsPaginated;
+    const records = paginated?.reviews;
     if (!Array.isArray(records)) {
         throw failure(
             'INVALID_PROVIDER_RESPONSE',
             'The review provider returned an unexpected response.'
         );
     }
-    return records.map((record) => {
-        if (!record || typeof record !== 'object' || Array.isArray(record))
-            return null;
-        return {
-            text: record.body,
-            rating: record.rating,
-            sourceReviewId: record.id,
-            title: record.title,
-            reviewerName: record.reviewer?.name,
-            isVerifiedPurchase: record.verifiedPurchase,
-        };
-    });
+    return {
+        records: records.map((record) => {
+            if (!record || typeof record !== 'object' || Array.isArray(record))
+                return null;
+            return {
+                text: record.body,
+                rating: record.rating,
+                sourceReviewId: record.id,
+                title: record.title,
+                reviewerName: record.reviewer?.name,
+                isVerifiedPurchase: record.verifiedPurchase,
+            };
+        }),
+        // Missing or malformed page info means there is no proven next page.
+        hasNextPage: paginated.pageInfo?.hasNextPage === true,
+    };
+}
+
+export function mapCanopyReviews(payload) {
+    return mapCanopyReviewPage(payload).records;
 }
 
 // Call only from a backend orchestration service AFTER target ownership checks.
@@ -47,6 +61,7 @@ export async function fetchCanopyReviews(
         amazonCookie = process.env.CANOPY_AMAZON_COOKIE,
         fetchImpl = globalThis.fetch,
         timeoutMs = 60000,
+        totalTimeoutMs = TOTAL_TIMEOUT_MS,
     } = {}
 ) {
     const { asin, domain } = parseAmazonSource(sourceUrl);
@@ -65,9 +80,57 @@ export async function fetchCanopyReviews(
     if (!Number.isInteger(timeoutMs) || timeoutMs < 1 || timeoutMs > 60000) {
         throw new TypeError('timeoutMs must be an integer from 1 to 60000.');
     }
+    if (
+        !Number.isInteger(totalTimeoutMs) ||
+        totalTimeoutMs < 1 ||
+        totalTimeoutMs > TOTAL_TIMEOUT_MS
+    ) {
+        throw new TypeError(
+            `totalTimeoutMs must be an integer from 1 to ${TOTAL_TIMEOUT_MS}.`
+        );
+    }
     const endpoint = new URL(ENDPOINT);
     endpoint.searchParams.set('asin', asin);
     endpoint.searchParams.set('domain', domain);
+    // One deadline for the whole import keeps it well inside the import lock.
+    const deadline = Date.now() + totalTimeoutMs;
+    const collected = [];
+    for (let page = 1; page <= MAX_REVIEW_PAGES; page += 1) {
+        const remaining = deadline - Date.now();
+        if (remaining <= 0) {
+            throw failure(
+                'PROVIDER_TIMEOUT',
+                'Review import timed out. Try again later.'
+            );
+        }
+        const { records, hasNextPage } = await requestPage(endpoint, page, {
+            apiKey,
+            amazonCookie,
+            fetchImpl,
+            timeoutMs: Math.min(timeoutMs, remaining),
+        });
+        collected.push(...records);
+        const usable = deduplicateReviews(
+            normalizeReviews(collected).reviews
+        ).length;
+        if (
+            usable >= MIN_USABLE_REVIEWS ||
+            !hasNextPage ||
+            records.length === 0
+        ) {
+            break;
+        }
+    }
+    return collected;
+}
+
+async function requestPage(
+    endpointUrl,
+    page,
+    { apiKey, amazonCookie, fetchImpl, timeoutMs }
+) {
+    const endpoint = new URL(endpointUrl);
+    endpoint.searchParams.set('page', String(page));
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), timeoutMs);
     try {
@@ -113,7 +176,7 @@ export async function fetchCanopyReviews(
                 'The review provider response could not be read. Try again later.'
             );
         }
-        return mapCanopyReviews(payload);
+        return mapCanopyReviewPage(payload);
     } finally {
         clearTimeout(timer);
     }
