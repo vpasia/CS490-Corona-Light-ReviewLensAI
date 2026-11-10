@@ -2,10 +2,23 @@ const INVALID_PRODUCT_MESSAGE =
   'That doesn’t look like an Amazon product link. Paste a URL containing /dp/ or a 10-character ASIN.';
 const ASIN_PATTERN = /^[A-Z0-9]{10}$/i;
 const PRODUCT_PATH_PATTERN = /\/(?:dp|gp\/product)\/[A-Z0-9]{10}(?:[/?]|$)/i;
-const AMAZON_HOST_PATTERN =
-  /^(?:[a-z0-9-]+\.)?amazon\.(?:com|ca|co\.uk|de|fr|it|es|nl|se|pl|co\.jp|in|com\.au|com\.mx|com\.br|sg|ae|sa)$/i;
+const AMAZON_HOSTS = new Set(['amazon.com', 'www.amazon.com']);
+
+// URL parsing can silently strip control characters, so reject them in the original input.
+function hasAsciiControlCharacters(value) {
+  for (let index = 0; index < value.length; index += 1) {
+    const code = value.charCodeAt(index);
+    if (code <= 0x1f || code === 0x7f) {
+      return true;
+    }
+  }
+  return false;
+}
 
 export function validateProductInput(value) {
+  if (hasAsciiControlCharacters(value)) {
+    return INVALID_PRODUCT_MESSAGE;
+  }
   const input = value.trim();
 
   if (!input) {
@@ -22,8 +35,13 @@ export function validateProductInput(value) {
     return INVALID_PRODUCT_MESSAGE;
   }
 
-  const isWebLink = url.protocol === 'https:' || url.protocol === 'http:';
-  if (!isWebLink || !AMAZON_HOST_PATTERN.test(url.hostname)) {
+  if (
+    url.protocol !== 'https:' ||
+    !AMAZON_HOSTS.has(url.hostname) ||
+    url.username ||
+    url.password ||
+    url.port
+  ) {
     return INVALID_PRODUCT_MESSAGE;
   }
   if (!PRODUCT_PATH_PATTERN.test(url.pathname)) {
