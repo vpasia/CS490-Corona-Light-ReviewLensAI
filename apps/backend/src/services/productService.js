@@ -31,9 +31,29 @@ export async function createProduct(uid, input, db = getDb()) {
 
 export async function deleteProduct(uid, productId, db = getDb()) {
     await getOwnedProduct(uid, productId, db);
+    const productRef = db.collection('products').doc(productId);
+    await db.runTransaction(async (transaction) => {
+        const snapshot = await transaction.get(productRef);
+        const product = snapshot.data();
+        if (!snapshot.exists || product?.userId !== uid) {
+            throw new AppError(404, 'PRODUCT_NOT_FOUND', 'Product not found.');
+        }
+        if (
+            !product.deleting &&
+            product.activeIngestionRunId &&
+            product.ingestionLockUntil > Date.now()
+        ) {
+            throw new AppError(
+                409,
+                'INGESTION_IN_PROGRESS',
+                'Wait for the current review import to finish before deleting this product.'
+            );
+        }
+        transaction.update(productRef, { deleting: true });
+    });
 
     const references = [];
-    for (const collectionName of ['reviews', 'analyses']) {
+    for (const collectionName of ['reviews', 'ingestionRuns']) {
         const children = await db
             .collection(collectionName)
             .where('userId', '==', uid)
@@ -44,7 +64,7 @@ export async function deleteProduct(uid, productId, db = getDb()) {
         }
     }
 
-    references.push(db.collection('products').doc(productId));
+    references.push(productRef);
     for (let index = 0; index < references.length; index += 400) {
         const batch = db.batch();
         for (const ref of references.slice(index, index + 400)) {

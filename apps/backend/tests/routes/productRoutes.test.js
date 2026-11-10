@@ -6,6 +6,17 @@ let nextId = 1;
 const verifyIdToken = jest.fn();
 const getFirebaseAuth = jest.fn();
 const db = {
+    async runTransaction(callback) {
+        const updates = [];
+        const result = await callback({
+            get: (ref) => ref.get(),
+            update: (ref, value) => updates.push([ref, value]),
+        });
+        for (const [ref, value] of updates) {
+            documents.set(ref.id, { ...documents.get(ref.id), ...value });
+        }
+        return result;
+    },
     batch() {
         const references = [];
         return {
@@ -20,7 +31,7 @@ const db = {
         };
     },
     collection(name) {
-        if (name === 'reviews' || name === 'analyses') {
+        if (name === 'reviews' || name === 'ingestionRuns') {
             const query = {
                 where() {
                     return query;
@@ -225,6 +236,24 @@ test('deletes an owned product', async () => {
     expect(response.status).toBe(200);
     expect(response.body).toEqual({ data: { productId: 'product-7' } });
     expect(documents.has('product-7')).toBe(false);
+});
+
+test('returns 409 when deleting a product with an active import', async () => {
+    documents.set('product-7', {
+        productId: 'product-7',
+        userId: 'user-A',
+        activeIngestionRunId: 'run-7',
+        ingestionLockUntil: Date.now() + 60_000,
+    });
+    verifyIdToken.mockResolvedValue({ uid: 'user-A' });
+
+    const response = await request(app)
+        .delete('/api/products/product-7')
+        .set('Authorization', 'Bearer token-A');
+
+    expect(response.status).toBe(409);
+    expect(response.body.error.code).toBe('INGESTION_IN_PROGRESS');
+    expect(documents.get('product-7').deleting).toBeUndefined();
 });
 
 test('returns the same 404 when deleting a missing product', async () => {

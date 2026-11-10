@@ -13,11 +13,27 @@ const { getOwnedProduct } = await import('../../src/services/ownership.js');
 function fakeFirestore({ failBatchNumber } = {}) {
     const documents = new Map();
     const reviews = new Map();
-    const analyses = new Map();
-    const collections = { products: documents, reviews, analyses };
+    const ingestionRuns = new Map();
+    const collections = {
+        products: documents,
+        reviews,
+        ingestionRuns,
+    };
     let nextId = 1;
     let batchCommits = 0;
     const db = {
+        async runTransaction(callback) {
+            const updates = [];
+            const result = await callback({
+                get: (ref) => ref.get(),
+                update: (ref, value) => updates.push([ref, value]),
+            });
+            for (const [ref, value] of updates) {
+                const stored = collections[ref.collectionName];
+                stored.set(ref.id, { ...stored.get(ref.id), ...value });
+            }
+            return result;
+        },
         batch() {
             const deletions = [];
             return {
@@ -84,7 +100,7 @@ function fakeFirestore({ failBatchNumber } = {}) {
             };
         },
     };
-    return { db, documents, reviews, analyses };
+    return { db, documents, reviews, ingestionRuns };
 }
 
 test('creates one owned Amazon product with its source URL', async () => {
@@ -222,8 +238,8 @@ test.each([undefined, ''])(
     }
 );
 
-test('deletes an owned product and only its matching reviews and analyses', async () => {
-    const { db, documents, reviews, analyses } = fakeFirestore();
+test('deletes an owned product and only its matching reviews', async () => {
+    const { db, documents, reviews } = fakeFirestore();
     documents.set('product-A', { productId: 'product-A', userId: 'user-A' });
     documents.set('product-B', { productId: 'product-B', userId: 'user-B' });
     reviews.set('review-A', { userId: 'user-A', productId: 'product-A' });
@@ -232,11 +248,6 @@ test('deletes an owned product and only its matching reviews and analyses', asyn
         productId: 'product-B',
     });
     reviews.set('review-other-user', {
-        userId: 'user-B',
-        productId: 'product-A',
-    });
-    analyses.set('analysis-A', { userId: 'user-A', productId: 'product-A' });
-    analyses.set('analysis-other', {
         userId: 'user-B',
         productId: 'product-A',
     });
@@ -251,7 +262,6 @@ test('deletes an owned product and only its matching reviews and analyses', asyn
         'review-other-product',
         'review-other-user',
     ]);
-    expect([...analyses.keys()]).toEqual(['analysis-other']);
 });
 
 test('rejects another user’s delete without changing the product or children', async () => {
@@ -281,11 +291,12 @@ test('keeps the product and children when the first deletion batch fails', async
     );
 
     expect(documents.has('product-A')).toBe(true);
+    expect(documents.get('product-A').deleting).toBe(true);
     expect(reviews.has('review-A')).toBe(true);
 });
 
 test('can retry after a later deletion batch fails', async () => {
-    const { db, documents, reviews, analyses } = fakeFirestore({
+    const { db, documents, reviews } = fakeFirestore({
         failBatchNumber: 2,
     });
     documents.set('product-A', { productId: 'product-A', userId: 'user-A' });
@@ -295,19 +306,58 @@ test('can retry after a later deletion batch fails', async () => {
             productId: 'product-A',
         });
     }
-    analyses.set('analysis-A', { userId: 'user-A', productId: 'product-A' });
 
     await expect(deleteProduct('user-A', 'product-A', db)).rejects.toThrow(
         'batch delete failed'
     );
     expect(documents.has('product-A')).toBe(true);
     expect(reviews.size).toBe(1);
-    expect(analyses.has('analysis-A')).toBe(true);
 
     await expect(deleteProduct('user-A', 'product-A', db)).resolves.toBe(
         'product-A'
     );
     expect(documents.has('product-A')).toBe(false);
     expect(reviews.size).toBe(0);
-    expect(analyses.size).toBe(0);
+});
+
+test('rejects deletion while an import lease is active without changing data', async () => {
+    const { db, documents, reviews, ingestionRuns } = fakeFirestore();
+    documents.set('product-A', {
+        productId: 'product-A',
+        userId: 'user-A',
+        activeIngestionRunId: 'run-A',
+        ingestionLockUntil: Date.now() + 60_000,
+    });
+    reviews.set('review-A', { userId: 'user-A', productId: 'product-A' });
+    ingestionRuns.set('run-A', { userId: 'user-A', productId: 'product-A' });
+
+    await expect(
+        deleteProduct('user-A', 'product-A', db)
+    ).rejects.toMatchObject({
+        status: 409,
+        code: 'INGESTION_IN_PROGRESS',
+    });
+    expect(documents.get('product-A').deleting).toBeUndefined();
+    expect(reviews.has('review-A')).toBe(true);
+    expect(ingestionRuns.has('run-A')).toBe(true);
+});
+
+test('deletes matching ingestion runs and leaves other users’ runs intact', async () => {
+    const { db, documents, ingestionRuns } = fakeFirestore();
+    documents.set('product-A', { productId: 'product-A', userId: 'user-A' });
+    ingestionRuns.set('run-A', { userId: 'user-A', productId: 'product-A' });
+    ingestionRuns.set('run-other-user', {
+        userId: 'user-B',
+        productId: 'product-A',
+    });
+    ingestionRuns.set('run-other-product', {
+        userId: 'user-A',
+        productId: 'product-B',
+    });
+
+    await deleteProduct('user-A', 'product-A', db);
+
+    expect(ingestionRuns.has('run-A')).toBe(false);
+    expect(ingestionRuns.has('run-other-user')).toBe(true);
+    expect(ingestionRuns.has('run-other-product')).toBe(true);
 });
