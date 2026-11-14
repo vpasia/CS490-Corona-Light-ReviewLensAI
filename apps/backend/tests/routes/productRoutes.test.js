@@ -6,14 +6,14 @@ let db = memoryDb({ products: {} });
 let documents = db.maps.get('products');
 const verifyIdToken = jest.fn();
 const getFirebaseAuth = jest.fn();
-const fetchCanopyReviews = jest.fn();
+const fetchBrightDataReviews = jest.fn();
 
 jest.unstable_mockModule('../../src/config/firebaseAdmin.js', () => ({
     getDb: () => db,
     getFirebaseAuth,
 }));
-jest.unstable_mockModule('../../src/services/canopyService.js', () => ({
-    fetchCanopyReviews,
+jest.unstable_mockModule('../../src/services/brightDataService.js', () => ({
+    fetchBrightDataReviews,
 }));
 
 const { default: app } = await import('../../src/app.js');
@@ -27,7 +27,7 @@ beforeEach(() => {
     documents = db.maps.get('products');
     verifyIdToken.mockReset();
     getFirebaseAuth.mockReset();
-    fetchCanopyReviews.mockReset();
+    fetchBrightDataReviews.mockReset();
     getFirebaseAuth.mockReturnValue({ verifyIdToken });
 });
 
@@ -109,7 +109,7 @@ test('user B cannot import reviews or create review records under user A target'
 
     expect(response.status).toBe(404);
     expect(response.body.error.code).toBe('PRODUCT_NOT_FOUND');
-    expect(fetchCanopyReviews).not.toHaveBeenCalled();
+    expect(fetchBrightDataReviews).not.toHaveBeenCalled();
     expect(db.docs('ingestionRuns')).toHaveLength(0);
     expect(db.docs('reviews')).toEqual(beforeReviews);
     expect(db.docs('reviewCaches')).toEqual(beforeCache);
@@ -124,7 +124,7 @@ test('owner can read reviews and initiate synchronous import', async () => {
         },
     });
     verifyIdToken.mockResolvedValue({ uid: 'user-A' });
-    fetchCanopyReviews.mockResolvedValue([
+    fetchBrightDataReviews.mockResolvedValue([
         { reviewId: 'source-1', text: 'Owner review', rating: 5 },
     ]);
 
