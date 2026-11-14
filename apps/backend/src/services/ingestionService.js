@@ -2,7 +2,7 @@ import { FieldValue } from 'firebase-admin/firestore';
 import { getDb } from '../config/firebaseAdmin.js';
 import { AppError } from '../utils/AppError.js';
 import { getOwnedProduct, requireOwner } from './ownership.js';
-import { fetchCanopyReviews } from './canopyService.js';
+import { fetchBrightDataReviews } from './brightDataService.js';
 import { normalizeReviews } from './reviewNormalizer.js';
 import { prepareReviewRecords, stageReviewWrites } from './reviewWrites.js';
 import { validateReviewIdentity as validateIdentity } from './reviewService.js';
@@ -80,7 +80,7 @@ const response = (run) => ({
 export async function importReviews(uid, productId, options = {}) {
     validateIdentity(uid, productId);
     const db = options.db ?? getDb();
-    const fetchReviews = options.fetchReviews ?? fetchCanopyReviews;
+    const fetchReviews = options.fetchReviews ?? fetchBrightDataReviews;
     const productRef = db.collection('products').doc(productId);
     const runRef = db.collection('ingestionRuns').doc();
     let admission;
