@@ -30,3 +30,11 @@ export async function importReviews(productId) {
   );
   return response?.data ?? null;
 }
+
+export async function askQuestion(productId, question) {
+  const response = await apiRequest(`/api/products/${encodeURIComponent(productId)}/questions`, {
+    method: 'POST',
+    bode: { question },
+  });
+  return response?.data ?? null;
+}
