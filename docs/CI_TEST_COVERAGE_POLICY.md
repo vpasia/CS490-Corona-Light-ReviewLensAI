@@ -131,7 +131,7 @@ This runs Vitest with coverage enabled and enforces the configured overall cover
 
 To check changed-line coverage locally, install diff-cover if it is not already installed:
 ```bash
-python -m pip install diff-cover==9.2.6
+python -m pip install 'diff-cover>=9.0.0,<10.0.0'
 ```
 
 Fetch the latest main branch and run:
@@ -152,7 +152,7 @@ This runs Jest with coverage enabled and enforces the configured overall coverag
 
 To check changed-line coverage locally:
 ```bash
-python -m pip install diff-cover==9.2.6
+python -m pip install 'diff-cover>=9.0.0,<10.0.0'
 git fetch origin main
 diff-cover coverage/lcov.info --compare-branch=origin/main --fail-under=80
 ```

@@ -67,7 +67,7 @@ jobs:
       
       - name: Install changed-line coverage tool
         if: ${{ github.event_name == 'pull_request' }}
-        run: python -m pip install diff-cover==9.2.6
+        run: python -m pip install 'diff-cover>=9.0.0,<10.0.0'
 
       - name: Enforce 80% changed-line coverage
         if: ${{ github.event_name == 'pull_request' }}
@@ -155,7 +155,7 @@ jobs:
       
       - name: Install changed-line coverage tool
         if: ${{ github.event_name == 'pull_request' }}
-        run: python -m pip install diff-cover==9.2.6
+        run: python -m pip install 'diff-cover>=9.0.0,<10.0.0'
 
       - name: Enforce 80% changed-line coverage
         if: ${{ github.event_name == 'pull_request' }}
