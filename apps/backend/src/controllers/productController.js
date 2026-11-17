@@ -4,7 +4,7 @@ import {
     listProducts,
 } from '../services/productService.js';
 import { getOwnedProduct } from '../services/ownership.js';
-import { getReviews } from '../services/reviewService.js';
+import { getReviewDataset } from '../services/reviewService.js';
 import { importReviews } from '../services/ingestionService.js';
 import {
     getIngestionRun,
@@ -39,8 +39,11 @@ export async function getProducts(req, res) {
 }
 
 export async function getProductReviews(req, res) {
-    const reviews = await getReviews(req.user.uid, req.params.productId);
-    res.status(200).json({ data: reviews });
+    const { reviews, status, summary } = await getReviewDataset(
+        req.user.uid,
+        req.params.productId
+    );
+    res.status(200).json({ data: reviews, status, summary });
 }
 
 export async function importProductReviews(req, res) {
