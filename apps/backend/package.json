@@ -8,7 +8,26 @@
         "lint": "eslint .",
         "lint:fix": "eslint . --fix",
         "format": "prettier --write \"**/*.{js,json,md}\"",
-        "test": "cross-env NODE_OPTIONS=--experimental-vm-modules jest"
+        "test": "cross-env NODE_OPTIONS=--experimental-vm-modules jest",
+        "test:coverage": "cross-env NODE_OPTIONS=--experimental-vm-modules jest --coverage --runInBand"
+    },
+    "jest": {
+        "collectCoverage": true,
+        "coverageDirectory": "coverage",
+        "coverageReporters": ["text", "html", "lcov"],
+        "collectCoverageFrom": [
+            "src/**/*.js",
+            "!src/**/*.test.js",
+            "!src/**/*.spec.js"
+        ],
+        "coverageThreshold": {
+            "global": {
+                "statements": 70,
+                "branches": 60,
+                "functions": 70,
+                "lines": 70
+            }
+        }
     },
     "keywords": [],
     "type": "module",
