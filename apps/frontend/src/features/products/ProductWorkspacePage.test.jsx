@@ -227,4 +227,16 @@ describe('ProductWorkspacePage', () => {
     await screen.findByText('Sound is crisp');
     expect(listReviews.mock.calls).toEqual([['p1']]);
   });
+
+  it('summarizes the saved reviews for the active product', async () => {
+    getProduct.mockResolvedValue(product);
+    listReviews.mockResolvedValue([
+      { reviewId: 'r1', text: 'Great', rating: 5 },
+      { reviewId: 'r2', text: 'Okay', rating: 3 },
+    ]);
+    renderWorkspace();
+
+    expect(await screen.findByText('4.0 out of 5')).toBeInTheDocument();
+    expect(screen.getByText('Total reviews').nextElementSibling).toHaveTextContent('2');
+  });
 });
