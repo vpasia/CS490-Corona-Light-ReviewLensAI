@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { apiRequest } from '../../lib/api.js';
 
-import { listReviews } from './productsApi.js';
+import { askQuestion, listReviews } from './productsApi.js';
 
 vi.mock('../../lib/api.js', async (importOriginal) => ({
   ...(await importOriginal()),
@@ -29,5 +29,29 @@ describe('listReviews', () => {
     apiRequest.mockResolvedValue({});
 
     await expect(listReviews('p1')).resolves.toEqual([]);
+  });
+});
+
+describe('askQuestion', () => {
+  beforeEach(() => {
+    vi.resetAllMocks();
+  });
+
+  it('posts the question to the product’s analyze endpoint', async () => {
+    apiRequest.mockResolvedValue({ data: { answer: 'Battery life is praised.' } });
+
+    await expect(askQuestion('p 1', 'How is the battery?')).resolves.toEqual({
+      answer: 'Battery life is praised.',
+    });
+    expect(apiRequest).toHaveBeenCalledWith('/api/products/p%201/analyze', {
+      method: 'POST',
+      body: { question: 'How is the battery?' },
+    });
+  });
+
+  it('returns null when the response has no data', async () => {
+    apiRequest.mockResolvedValue({});
+
+    await expect(askQuestion('p1', 'Anything?')).resolves.toBeNull();
   });
 });

@@ -32,9 +32,9 @@ export async function importReviews(productId) {
 }
 
 export async function askQuestion(productId, question) {
-  const response = await apiRequest(`/api/products/${encodeURIComponent(productId)}/questions`, {
+  const response = await apiRequest(`/api/products/${encodeURIComponent(productId)}/analyze`, {
     method: 'POST',
-    bode: { question },
+    body: { question },
   });
   return response?.data ?? null;
 }
