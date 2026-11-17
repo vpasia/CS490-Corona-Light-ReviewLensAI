@@ -106,6 +106,7 @@ function ProductWorkspace({ productId }) {
 
       <SavedReviewsList
         status={reviews.status}
+        datasetStatus={reviews.datasetStatus}
         reviews={reviews.reviews}
         errorMessage={reviews.errorMessage}
         onRetry={reviews.reload}

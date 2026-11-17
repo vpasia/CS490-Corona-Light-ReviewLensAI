@@ -5,16 +5,30 @@ import { ApiError } from '@/lib/api.js';
 import { listReviews } from './productsApi.js';
 
 const LOAD_ERROR_MESSAGE = 'We couldn’t load saved reviews right now. Please try again.';
-const LOADING_STATE = { status: 'loading', reviews: [], errorMessage: '' };
+const LOADING_STATE = {
+  status: 'loading',
+  reviews: [],
+  datasetStatus: null,
+  summary: null,
+  errorMessage: '',
+};
 
 async function fetchReviewsState(productId) {
   try {
-    const reviews = await listReviews(productId);
-    return { status: 'ready', reviews: Array.isArray(reviews) ? reviews : [], errorMessage: '' };
+    const dataset = await listReviews(productId);
+    return {
+      status: 'ready',
+      reviews: Array.isArray(dataset?.reviews) ? dataset.reviews : [],
+      datasetStatus: dataset?.status ?? 'notImported',
+      summary: dataset?.status === 'ready' ? dataset.summary : null,
+      errorMessage: '',
+    };
   } catch (error) {
     return {
       status: 'error',
       reviews: [],
+      datasetStatus: null,
+      summary: null,
       errorMessage: error instanceof ApiError ? error.message : LOAD_ERROR_MESSAGE,
     };
   }

@@ -17,17 +17,27 @@ describe('listReviews', () => {
   });
 
   it('requests the product’s saved reviews', async () => {
-    apiRequest.mockResolvedValue({ data: [{ reviewId: 'r1', text: 'Great', rating: 5 }] });
+    apiRequest.mockResolvedValue({
+      data: [{ reviewId: 'r1', text: 'Great', rating: 5 }],
+      status: 'ready',
+      summary: { reviewCount: 1, averageRating: 5 },
+    });
 
-    await expect(listReviews('p 1')).resolves.toEqual([
-      { reviewId: 'r1', text: 'Great', rating: 5 },
-    ]);
+    await expect(listReviews('p 1')).resolves.toEqual({
+      reviews: [{ reviewId: 'r1', text: 'Great', rating: 5 }],
+      status: 'ready',
+      summary: { reviewCount: 1, averageRating: 5 },
+    });
     expect(apiRequest).toHaveBeenCalledWith('/api/products/p%201/reviews');
   });
 
   it('returns an empty list when the response has no data', async () => {
     apiRequest.mockResolvedValue({});
 
-    await expect(listReviews('p1')).resolves.toEqual([]);
+    await expect(listReviews('p1')).resolves.toEqual({
+      reviews: [],
+      status: 'notImported',
+      summary: null,
+    });
   });
 });

@@ -1,6 +1,6 @@
 import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { MemoryRouter, Route, Routes } from 'react-router';
+import { Link, MemoryRouter, Route, Routes } from 'react-router';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { ApiError } from '@/lib/api.js';
@@ -19,6 +19,12 @@ const product = {
   amazonUrl: 'https://www.amazon.com/dp/B0ABCDEF12',
 };
 const savedReview = { reviewId: 'r1', text: 'Sound is crisp', rating: 4 };
+const readyDataset = {
+  reviews: [savedReview],
+  status: 'ready',
+  summary: { reviewCount: 1, averageRating: 4 },
+};
+const emptyDataset = { reviews: [], status: 'notImported', summary: null };
 
 function renderWorkspace() {
   return render(
@@ -34,7 +40,7 @@ function renderWorkspace() {
 describe('ProductWorkspacePage', () => {
   beforeEach(() => {
     vi.resetAllMocks();
-    listReviews.mockResolvedValue([]);
+    listReviews.mockResolvedValue(emptyDataset);
   });
 
   it('shows loading placeholders while the product loads', () => {
@@ -173,7 +179,7 @@ describe('ProductWorkspacePage', () => {
 
   it('shows reviews saved earlier without importing again', async () => {
     getProduct.mockResolvedValue(product);
-    listReviews.mockResolvedValue([savedReview]);
+    listReviews.mockResolvedValue(readyDataset);
     renderWorkspace();
 
     expect(await screen.findByText('Sound is crisp')).toBeInTheDocument();
@@ -184,7 +190,7 @@ describe('ProductWorkspacePage', () => {
 
   it('refreshes the saved reviews after a successful import', async () => {
     getProduct.mockResolvedValue(product);
-    listReviews.mockResolvedValueOnce([]).mockResolvedValueOnce([savedReview]);
+    listReviews.mockResolvedValueOnce(emptyDataset).mockResolvedValueOnce(readyDataset);
     importReviews.mockResolvedValue({ savedCount: 1 });
     const user = userEvent.setup();
     renderWorkspace();
@@ -198,7 +204,7 @@ describe('ProductWorkspacePage', () => {
 
   it('keeps the saved reviews when an import fails', async () => {
     getProduct.mockResolvedValue(product);
-    listReviews.mockResolvedValue([savedReview]);
+    listReviews.mockResolvedValue(readyDataset);
     importReviews.mockRejectedValue(
       new ApiError({
         status: 409,
@@ -221,10 +227,63 @@ describe('ProductWorkspacePage', () => {
 
   it('only loads reviews for the product being viewed', async () => {
     getProduct.mockResolvedValue(product);
-    listReviews.mockResolvedValue([savedReview]);
+    listReviews.mockResolvedValue(readyDataset);
     renderWorkspace();
 
     await screen.findByText('Sound is crisp');
     expect(listReviews.mock.calls).toEqual([['p1']]);
+  });
+  it('shows the reimport state for an expired dataset and clears it after import', async () => {
+    getProduct.mockResolvedValue(product);
+    listReviews
+      .mockResolvedValueOnce({ reviews: [], status: 'expired', summary: null })
+      .mockResolvedValueOnce(readyDataset);
+    importReviews.mockResolvedValue({ reused: false, savedCount: 1 });
+    const user = userEvent.setup();
+    renderWorkspace();
+
+    expect(await screen.findByText('Reviews need reimporting')).toBeInTheDocument();
+    expect(screen.queryByText('No reviews imported')).not.toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Import reviews' }));
+    expect(await screen.findByText('Sound is crisp')).toBeInTheDocument();
+    expect(screen.queryByText('Reviews need reimporting')).not.toBeInTheDocument();
+  });
+  it('shows incomplete cache errors without old summary or expiry state', async () => {
+    getProduct.mockResolvedValue(product);
+    listReviews.mockRejectedValue(
+      new ApiError({
+        status: 503,
+        code: 'REVIEW_CACHE_INCOMPLETE',
+        message: 'Review data needs to be refreshed.',
+      }),
+    );
+    renderWorkspace();
+    expect(await screen.findByText('Review data needs to be refreshed.')).toBeInTheDocument();
+    expect(screen.queryByText('Reviews need reimporting')).not.toBeInTheDocument();
+  });
+  it('clears the previous target dataset while the next target loads', async () => {
+    getProduct.mockImplementation(async (id) => ({
+      ...product,
+      productId: id,
+      productName: id === 'p1' ? 'First product' : 'Second product',
+    }));
+    listReviews.mockImplementation((id) =>
+      id === 'p1' ? Promise.resolve(readyDataset) : new Promise(() => {}),
+    );
+    const user = userEvent.setup();
+    render(
+      <MemoryRouter initialEntries={['/products/p1/overview']}>
+        <Link to="/products/p2/overview">Next product</Link>
+        <Routes>
+          <Route path="/products/:productId/overview" element={<ProductWorkspacePage />} />
+        </Routes>
+      </MemoryRouter>,
+    );
+    expect(await screen.findByText('Sound is crisp')).toBeInTheDocument();
+    await user.click(screen.getByRole('link', { name: 'Next product' }));
+    expect(await screen.findByRole('heading', { name: 'Second product' })).toBeInTheDocument();
+    expect(screen.queryByText('Sound is crisp')).not.toBeInTheDocument();
+    expect(screen.getByRole('status', { name: 'Loading saved reviews' })).toBeInTheDocument();
+    expect(listReviews.mock.calls).toEqual([['p1'], ['p2']]);
   });
 });
