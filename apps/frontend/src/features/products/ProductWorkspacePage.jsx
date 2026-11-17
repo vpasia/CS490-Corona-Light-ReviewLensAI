@@ -6,6 +6,7 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { ApiError } from '@/lib/api.js';
 
 import ImportReviewsPanel from './ImportReviewsPanel.jsx';
+import ReviewSummaryCard from './ReviewSummaryCard.jsx';
 import SavedReviewsList from './SavedReviewsList.jsx';
 import { useImportReviews } from './useImportReviews.js';
 import { useProduct } from './useProduct.js';
@@ -103,6 +104,10 @@ function ProductWorkspace({ productId }) {
         errorMessage={importer.errorMessage}
         onImport={handleImport}
       />
+
+      {reviews.status === 'ready' && reviews.datasetStatus === 'ready' && (
+        <ReviewSummaryCard reviews={reviews.reviews} summary={reviews.summary} />
+      )}
 
       <SavedReviewsList
         status={reviews.status}

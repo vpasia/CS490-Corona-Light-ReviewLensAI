@@ -50,7 +50,7 @@ The plan calls for backend and frontend lint, tests, coverage, frontend format c
 
 Codex kept the existing `getReviews` array access used by ingestion and future analysis while adding `getReviewDataset` to derive the review list, dataset state, count, and mean rating from one owned transaction. The existing reviews route retains its `data` array and adds `status` and `summary`. The frontend carries those fields through its API and hook; the workspace displays the requested expiry message and refreshes after import. Tests cover saved-record changes, shared and separate ASINs, foreign targets, incomplete and invalid caches, route identity failures, and target switching. No external API integration, dependency, or configuration changed.
 
-The AI-assisted code and tests use only synthetic fixtures. The coding agent made no commit, push, merge, repository setting change, or PR. A human should review the diff, this transcript, and the security-sensitive data access before delivery.
+The AI-assisted code and tests use only synthetic fixtures. The initial implementation made no commit, push, merge, repository setting change, or PR. A human should review the diff, this transcript, and the security-sensitive data access before delivery.
 
 ## Local verification
 
@@ -59,3 +59,11 @@ The AI-assisted code and tests use only synthetic fixtures. The coding agent mad
 - Changed-line coverage with temporary `diff-cover`: backend 89%, frontend 85%, both above the policy's 80% threshold.
 - Prettier passed for every changed frontend file. The repository-wide `npm run format:check` still fails on untouched baseline files and generated coverage report scripts; no unrelated formatting changes were made.
 - `git diff --check` passed. The authenticated app was not manually exercised in a browser; the workspace states were verified with React Testing Library.
+
+## Merge conflict continuation, November 17, 2026
+
+**Developer prompt:** S2-006 was merged into `main` after this PR was opened; resolve its conflicts with S2-008 before starting S2-010.
+
+**Codex response and decisions:** Fetched `main` and started a local merge without a commit. Kept S2-006's summary card and rating breakdown together with S2-008's expired and incomplete dataset states. Updated the card to display the backend's saved-dataset count and average while its rating distribution still uses the reviews returned in the same response. Combined both branches' workspace tests and added checks that expiry, errors, and target changes hide stale summary values. A cached import with zero newly saved reviews still displays the current saved-dataset summary. No dependency or configuration changed; no push or PR action was performed.
+
+**Verification:** The merged frontend passed all 110 tests, lint (with generated coverage warnings only), and production build. The backend passed all 174 tests. The modified frontend files were formatted with Prettier. The authenticated app was not manually exercised.

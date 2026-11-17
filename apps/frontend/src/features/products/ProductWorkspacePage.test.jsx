@@ -156,14 +156,17 @@ describe('ProductWorkspacePage', () => {
 
   it('says cached reviews were reused instead of claiming a new import', async () => {
     getProduct.mockResolvedValue(product);
-    importReviews.mockResolvedValue({ reused: true, savedCount: 0, reviewCount: 30 });
+    listReviews.mockResolvedValue(readyDataset);
+    importReviews.mockResolvedValue({ reused: true, savedCount: 0, reviewCount: 1 });
     const user = userEvent.setup();
     renderWorkspace();
 
     await user.click(await screen.findByRole('button', { name: 'Import reviews' }));
 
-    expect(await screen.findByText('Using 30 cached reviews.')).toBeInTheDocument();
+    expect(await screen.findByText('Using 1 cached review.')).toBeInTheDocument();
     expect(screen.queryByText(/just now/)).not.toBeInTheDocument();
+    expect(screen.getByText('4.0 out of 5')).toBeInTheDocument();
+    expect(screen.getByText('Total reviews').nextElementSibling).toHaveTextContent('1');
   });
 
   it('still shows a plain message when the cached review count is missing', async () => {
@@ -233,6 +236,7 @@ describe('ProductWorkspacePage', () => {
     await screen.findByText('Sound is crisp');
     expect(listReviews.mock.calls).toEqual([['p1']]);
   });
+
   it('shows the reimport state for an expired dataset and clears it after import', async () => {
     getProduct.mockResolvedValue(product);
     listReviews
@@ -244,10 +248,13 @@ describe('ProductWorkspacePage', () => {
 
     expect(await screen.findByText('Reviews need reimporting')).toBeInTheDocument();
     expect(screen.queryByText('No reviews imported')).not.toBeInTheDocument();
+    expect(screen.queryByRole('heading', { name: 'Review summary' })).not.toBeInTheDocument();
     await user.click(screen.getByRole('button', { name: 'Import reviews' }));
     expect(await screen.findByText('Sound is crisp')).toBeInTheDocument();
     expect(screen.queryByText('Reviews need reimporting')).not.toBeInTheDocument();
+    expect(screen.getByText('4.0 out of 5')).toBeInTheDocument();
   });
+
   it('shows incomplete cache errors without old summary or expiry state', async () => {
     getProduct.mockResolvedValue(product);
     listReviews.mockRejectedValue(
@@ -258,9 +265,12 @@ describe('ProductWorkspacePage', () => {
       }),
     );
     renderWorkspace();
+
     expect(await screen.findByText('Review data needs to be refreshed.')).toBeInTheDocument();
     expect(screen.queryByText('Reviews need reimporting')).not.toBeInTheDocument();
+    expect(screen.queryByRole('heading', { name: 'Review summary' })).not.toBeInTheDocument();
   });
+
   it('clears the previous target dataset while the next target loads', async () => {
     getProduct.mockImplementation(async (id) => ({
       ...product,
@@ -279,11 +289,30 @@ describe('ProductWorkspacePage', () => {
         </Routes>
       </MemoryRouter>,
     );
+
     expect(await screen.findByText('Sound is crisp')).toBeInTheDocument();
+    expect(screen.getByText('4.0 out of 5')).toBeInTheDocument();
     await user.click(screen.getByRole('link', { name: 'Next product' }));
     expect(await screen.findByRole('heading', { name: 'Second product' })).toBeInTheDocument();
     expect(screen.queryByText('Sound is crisp')).not.toBeInTheDocument();
+    expect(screen.queryByRole('heading', { name: 'Review summary' })).not.toBeInTheDocument();
     expect(screen.getByRole('status', { name: 'Loading saved reviews' })).toBeInTheDocument();
     expect(listReviews.mock.calls).toEqual([['p1'], ['p2']]);
+  });
+
+  it('summarizes the saved reviews for the active product', async () => {
+    getProduct.mockResolvedValue(product);
+    listReviews.mockResolvedValue({
+      reviews: [
+        { reviewId: 'r1', text: 'Great', rating: 5 },
+        { reviewId: 'r2', text: 'Okay', rating: 3 },
+      ],
+      status: 'ready',
+      summary: { reviewCount: 2, averageRating: 4 },
+    });
+    renderWorkspace();
+
+    expect(await screen.findByText('4.0 out of 5')).toBeInTheDocument();
+    expect(screen.getByText('Total reviews').nextElementSibling).toHaveTextContent('2');
   });
 });
