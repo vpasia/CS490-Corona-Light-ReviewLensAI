@@ -20,7 +20,11 @@ export async function getProduct(productId) {
 
 export async function listReviews(productId) {
   const response = await apiRequest(`/api/products/${encodeURIComponent(productId)}/reviews`);
-  return response?.data ?? [];
+  return {
+    reviews: response?.data ?? [],
+    status: response?.status ?? 'notImported',
+    summary: response?.summary ?? null,
+  };
 }
 
 export async function importReviews(productId) {

@@ -105,10 +105,13 @@ function ProductWorkspace({ productId }) {
         onImport={handleImport}
       />
 
-      {reviews.status === 'ready' && <ReviewSummaryCard reviews={reviews.reviews} />}
+      {reviews.status === 'ready' && reviews.datasetStatus === 'ready' && (
+        <ReviewSummaryCard reviews={reviews.reviews} summary={reviews.summary} />
+      )}
 
       <SavedReviewsList
         status={reviews.status}
+        datasetStatus={reviews.datasetStatus}
         reviews={reviews.reviews}
         errorMessage={reviews.errorMessage}
         onRetry={reviews.reload}

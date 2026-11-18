@@ -1,7 +1,7 @@
 import { requireOwner } from './ownership.js';
 import { getDb } from '../config/firebaseAdmin.js';
 import { AppError } from '../utils/AppError.js';
-import { productAsin, isFresh, cacheQuery } from './reviewCache.js';
+import { productAsin, isFresh, isExpired, cacheQuery } from './reviewCache.js';
 
 export function validateReviewIdentity(uid, productId) {
     if (typeof uid !== 'string' || !uid.trim())
@@ -29,7 +29,7 @@ export async function saveReviews(uid, productId) {
     );
 }
 
-export async function getReviews(uid, productId, db) {
+export async function getReviewDataset(uid, productId, db) {
     validateReviewIdentity(uid, productId);
     const database = db ?? getDb();
     return database.runTransaction(async (tx) => {
@@ -41,7 +41,17 @@ export async function getReviews(uid, productId, db) {
         const cache = (
             await tx.get(database.collection('reviewCaches').doc(asin))
         ).data();
-        if (!isFresh(cache)) return [];
+        if (!cache) return { reviews: [], status: 'notImported', summary: null };
+        const now = Date.now();
+        if (!isFresh(cache, now)) {
+            if (isExpired(cache, now))
+                return { reviews: [], status: 'expired', summary: null };
+            throw new AppError(
+                503,
+                'REVIEW_CACHE_UNAVAILABLE',
+                'Review data needs to be refreshed.'
+            );
+        }
         const snapshot = await tx.get(
             cacheQuery(database, asin, cache.version)
         );
@@ -51,9 +61,20 @@ export async function getReviews(uid, productId, db) {
                 'REVIEW_CACHE_INCOMPLETE',
                 'Review data needs to be refreshed.'
             );
-        return snapshot.docs.map((doc) => ({
+        const reviews = snapshot.docs.map((doc) => ({
             ...doc.data(),
             reviewId: doc.id,
         }));
+        const averageRating =
+            reviews.reduce((sum, review) => sum + review.rating, 0) / reviews.length;
+        return {
+            reviews,
+            status: 'ready',
+            summary: { reviewCount: reviews.length, averageRating },
+        };
     });
+}
+
+export async function getReviews(uid, productId, db) {
+    return (await getReviewDataset(uid, productId, db)).reviews;
 }

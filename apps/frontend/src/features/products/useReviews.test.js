@@ -18,23 +18,29 @@ describe('useReviews', () => {
   });
 
   it('loads saved reviews', async () => {
-    listReviews.mockResolvedValue([review]);
+    listReviews.mockResolvedValue({
+      reviews: [review],
+      status: 'ready',
+      summary: { reviewCount: 1, averageRating: 4 },
+    });
 
     const { result } = renderHook(() => useReviews('p1'));
 
     expect(result.current.status).toBe('loading');
     await waitFor(() => expect(result.current.status).toBe('ready'));
     expect(result.current.reviews).toEqual([review]);
+    expect(result.current.summary).toEqual({ reviewCount: 1, averageRating: 4 });
     expect(listReviews).toHaveBeenCalledWith('p1');
   });
 
   it('treats a missing list as no reviews', async () => {
-    listReviews.mockResolvedValue(undefined);
+    listReviews.mockResolvedValue({ reviews: [], status: 'notImported', summary: null });
 
     const { result } = renderHook(() => useReviews('p1'));
 
     await waitFor(() => expect(result.current.status).toBe('ready'));
     expect(result.current.reviews).toEqual([]);
+    expect(result.current.datasetStatus).toBe('notImported');
   });
 
   it('shows the server’s message and recovers on reload', async () => {
@@ -46,19 +52,32 @@ describe('useReviews', () => {
           message: 'Review data needs to be refreshed.',
         }),
       )
-      .mockResolvedValueOnce([review]);
+      .mockResolvedValueOnce({
+        reviews: [review],
+        status: 'ready',
+        summary: { reviewCount: 1, averageRating: 4 },
+      });
 
     const { result } = renderHook(() => useReviews('p1'));
 
     await waitFor(() => expect(result.current.status).toBe('error'));
     expect(result.current.errorMessage).toBe('Review data needs to be refreshed.');
     expect(result.current.reviews).toEqual([]);
+    expect(result.current.summary).toBeNull();
 
     act(() => result.current.reload());
 
     await waitFor(() => expect(result.current.status).toBe('ready'));
     expect(result.current.reviews).toEqual([review]);
     expect(result.current.errorMessage).toBe('');
+  });
+
+  it('carries an expired dataset without a numeric summary', async () => {
+    listReviews.mockResolvedValue({ reviews: [], status: 'expired', summary: null });
+    const { result } = renderHook(() => useReviews('p1'));
+    await waitFor(() => expect(result.current.datasetStatus).toBe('expired'));
+    expect(result.current.reviews).toEqual([]);
+    expect(result.current.summary).toBeNull();
   });
 
   it('hides unexpected error details', async () => {

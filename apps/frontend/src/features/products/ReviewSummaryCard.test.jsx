@@ -10,10 +10,11 @@ const reviews = [
   { reviewId: 'r4', text: 'd', rating: 3 },
   { reviewId: 'r5', text: 'e', rating: 1 },
 ];
+const summary = { reviewCount: 5, averageRating: 3.6 };
 
 describe('ReviewSummaryCard', () => {
   it('shows the review count and average rating', () => {
-    render(<ReviewSummaryCard reviews={reviews} />);
+    render(<ReviewSummaryCard reviews={reviews} summary={summary} />);
 
     expect(screen.getByRole('heading', { name: 'Review summary' })).toBeInTheDocument();
     expect(screen.getByText('Total reviews').nextElementSibling).toHaveTextContent('5');
@@ -21,7 +22,7 @@ describe('ReviewSummaryCard', () => {
   });
 
   it('shows how many reviews gave each star rating', () => {
-    render(<ReviewSummaryCard reviews={reviews} />);
+    render(<ReviewSummaryCard reviews={reviews} summary={summary} />);
 
     const items = within(screen.getByRole('list', { name: 'Ratings breakdown' })).getAllByRole(
       'listitem',
@@ -36,8 +37,18 @@ describe('ReviewSummaryCard', () => {
   });
 
   it('shows nothing when there are no reviews', () => {
-    const { container } = render(<ReviewSummaryCard reviews={[]} />);
+    const { container } = render(
+      <ReviewSummaryCard reviews={[]} summary={{ reviewCount: 0, averageRating: null }} />,
+    );
 
     expect(container).toBeEmptyDOMElement();
+  });
+
+  it('uses the summary supplied by the saved dataset response', () => {
+    render(
+      <ReviewSummaryCard reviews={reviews} summary={{ reviewCount: 5, averageRating: 4.25 }} />,
+    );
+
+    expect(screen.getByText('4.3 out of 5')).toBeInTheDocument();
   });
 });

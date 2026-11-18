@@ -19,7 +19,7 @@ export function productAsin(product) {
         );
     return asin;
 }
-export function isFresh(cache, now = Date.now()) {
+function hasPublishedMetadata(cache, now) {
     return (
         !cache?.deleting &&
         typeof cache?.version === 'string' &&
@@ -28,9 +28,14 @@ export function isFresh(cache, now = Date.now()) {
         Number.isFinite(cache.fetchedAtMs) &&
         Number.isFinite(cache.expiresAtMs) &&
         cache.fetchedAtMs <= now &&
-        cache.expiresAtMs === cache.fetchedAtMs + REVIEW_TTL_MS &&
-        cache.expiresAtMs > now
+        cache.expiresAtMs === cache.fetchedAtMs + REVIEW_TTL_MS
     );
+}
+export function isFresh(cache, now = Date.now()) {
+    return hasPublishedMetadata(cache, now) && cache.expiresAtMs > now;
+}
+export function isExpired(cache, now = Date.now()) {
+    return hasPublishedMetadata(cache, now) && cache.expiresAtMs <= now;
 }
 export function deduplicateReviews(reviews) {
     const seen = new Set();

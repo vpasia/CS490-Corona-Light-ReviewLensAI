@@ -1,9 +1,11 @@
 import { STAR_VALUES, summarizeReviews } from './reviewSummary.js';
 
-export default function ReviewSummaryCard({ reviews }) {
-  const { count, average, distribution } = summarizeReviews(reviews);
+export default function ReviewSummaryCard({ reviews, summary }) {
+  const { distribution } = summarizeReviews(reviews);
+  const count = summary?.reviewCount ?? 0;
+  const average = summary?.averageRating;
 
-  if (count === 0) {
+  if (count === 0 || average == null) {
     return null;
   }
 
