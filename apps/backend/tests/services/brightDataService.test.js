@@ -2,7 +2,7 @@
 import assert from 'node:assert/strict';
 import { describe, it } from '@jest/globals';
 import {
-    fetchBrightDataReviews,
+    fetchSerpApiReviews,
     mapBrightDataReview,
     mapBrightDataReviews,
 } from '../../src/services/brightDataService.js';
@@ -147,7 +147,7 @@ describe('Bright Data review service', () => {
             let called = false;
 
             await assert.rejects(
-                fetchBrightDataReviews(url, {
+                fetchSerpApiReviews(url, {
                     ...options,
                     fetchImpl: async () => {
                         called = true;
@@ -162,7 +162,7 @@ describe('Bright Data review service', () => {
     });
 
     it('triggers the configured Bright Data dataset with credentials in the header', async () => {
-        const records = await fetchBrightDataReviews(source, {
+        const records = await fetchSerpApiReviews(source, {
             ...options,
             fetchImpl: serveDirect([review('R1')], (url, init) => {
                 const parsed = new URL(url);
@@ -201,7 +201,7 @@ describe('Bright Data review service', () => {
     });
 
     it('allows maxReviews to be configured in the trigger payload', async () => {
-        await fetchBrightDataReviews(source, {
+        await fetchSerpApiReviews(source, {
             ...options,
             maxReviews: 25,
             fetchImpl: serveDirect([], (_url, init) => {
@@ -213,7 +213,7 @@ describe('Bright Data review service', () => {
     it('requires server credentials without making a request', async () => {
         for (const missing of [{ apiKey: '' }, { datasetId: '' }]) {
             await assert.rejects(
-                fetchBrightDataReviews(source, {
+                fetchSerpApiReviews(source, {
                     ...options,
                     ...missing,
                     fetchImpl: async () => assert.fail('must not request'),
@@ -236,7 +236,7 @@ describe('Bright Data review service', () => {
 
         for (const invalid of invalidOptions) {
             await assert.rejects(
-                fetchBrightDataReviews(source, {
+                fetchSerpApiReviews(source, {
                     ...options,
                     ...invalid,
                     fetchImpl:
@@ -257,7 +257,7 @@ describe('Bright Data review service', () => {
             [500, 'UPSTREAM_PROVIDER_ERROR'],
         ]) {
             await assert.rejects(
-                fetchBrightDataReviews(source, {
+                fetchSerpApiReviews(source, {
                     ...options,
                     fetchImpl: async () =>
                         response(
@@ -276,7 +276,7 @@ describe('Bright Data review service', () => {
 
     it('handles network failures and invalid JSON', async () => {
         await assert.rejects(
-            fetchBrightDataReviews(source, {
+            fetchSerpApiReviews(source, {
                 ...options,
                 fetchImpl: async () => {
                     throw new Error('secret');
@@ -290,7 +290,7 @@ describe('Bright Data review service', () => {
         );
 
         await assert.rejects(
-            fetchBrightDataReviews(source, {
+            fetchSerpApiReviews(source, {
                 ...options,
                 fetchImpl: async () => ({
                     ok: true,
@@ -309,7 +309,7 @@ describe('Bright Data snapshot collection', () => {
     it('polls until the snapshot is ready, then maps its results', async () => {
         const calls = [];
 
-        const records = await fetchBrightDataReviews(source, {
+        const records = await fetchSerpApiReviews(source, {
             ...options,
             fetchImpl: async (url, init) => {
                 const parsed = new URL(url);
@@ -367,7 +367,7 @@ describe('Bright Data snapshot collection', () => {
     it('accepts the alternate snapshotId property', async () => {
         const paths = [];
 
-        await fetchBrightDataReviews(source, {
+        await fetchSerpApiReviews(source, {
             ...options,
             fetchImpl: async (url) => {
                 const parsed = new URL(url);
@@ -408,7 +408,7 @@ describe('Bright Data snapshot collection', () => {
 
     it('rejects a trigger response without a snapshot identifier or direct records', async () => {
         await assert.rejects(
-            fetchBrightDataReviews(source, {
+            fetchSerpApiReviews(source, {
                 ...options,
                 fetchImpl: serveDirect({
                     status: 'running',
@@ -423,7 +423,7 @@ describe('Bright Data snapshot collection', () => {
             let progressCalls = 0;
 
             await assert.rejects(
-                fetchBrightDataReviews(source, {
+                fetchSerpApiReviews(source, {
                     ...options,
                     fetchImpl: async (url) => {
                         const pathname = new URL(url).pathname;
@@ -449,7 +449,7 @@ describe('Bright Data snapshot collection', () => {
         const started = Date.now();
 
         await assert.rejects(
-            fetchBrightDataReviews(source, {
+            fetchSerpApiReviews(source, {
                 ...options,
                 totalTimeoutMs: 250,
                 pollIntervalMs: 100,
