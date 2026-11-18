@@ -21,7 +21,7 @@ function ReviewItem({ review }) {
   );
 }
 
-function SavedReviewsContent({ status, reviews, errorMessage, onRetry }) {
+function SavedReviewsContent({ status, datasetStatus, reviews, errorMessage, onRetry }) {
   if (status === 'loading') {
     return (
       <div role="status" aria-label="Loading saved reviews" className="flex flex-col gap-3">
@@ -38,6 +38,16 @@ function SavedReviewsContent({ status, reviews, errorMessage, onRetry }) {
         title="We couldn’t load saved reviews"
         message={errorMessage}
         onRetry={onRetry}
+        className="border-0 py-8"
+      />
+    );
+  }
+
+  if (datasetStatus === 'expired') {
+    return (
+      <EmptyState
+        title="Reviews need reimporting"
+        description="Import reviews again to continue analyzing this product."
         className="border-0 py-8"
       />
     );
@@ -62,7 +72,13 @@ function SavedReviewsContent({ status, reviews, errorMessage, onRetry }) {
   );
 }
 
-export default function SavedReviewsList({ status, reviews, errorMessage, onRetry }) {
+export default function SavedReviewsList({
+  status,
+  datasetStatus,
+  reviews,
+  errorMessage,
+  onRetry,
+}) {
   const count = status === 'ready' && reviews.length > 0 ? ` (${reviews.length})` : '';
 
   return (
@@ -75,6 +91,7 @@ export default function SavedReviewsList({ status, reviews, errorMessage, onRetr
       </h2>
       <SavedReviewsContent
         status={status}
+        datasetStatus={datasetStatus}
         reviews={reviews}
         errorMessage={errorMessage}
         onRetry={onRetry}

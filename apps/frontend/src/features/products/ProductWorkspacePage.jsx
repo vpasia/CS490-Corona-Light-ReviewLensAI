@@ -7,6 +7,7 @@ import { ApiError } from '@/lib/api.js';
 
 import AskPanel from './AskPanel.jsx';
 import ImportReviewsPanel from './ImportReviewsPanel.jsx';
+import ReviewSummaryCard from './ReviewSummaryCard.jsx';
 import SavedReviewsList from './SavedReviewsList.jsx';
 import { useAskQuestion } from './useAskQuestion.js';
 import { useImportReviews } from './useImportReviews.js';
@@ -107,8 +108,13 @@ function ProductWorkspace({ productId }) {
         onImport={handleImport}
       />
 
+      {reviews.status === 'ready' && reviews.datasetStatus === 'ready' && (
+        <ReviewSummaryCard reviews={reviews.reviews} summary={reviews.summary} />
+      )}
+
       <SavedReviewsList
         status={reviews.status}
+        datasetStatus={reviews.datasetStatus}
         reviews={reviews.reviews}
         errorMessage={reviews.errorMessage}
         onRetry={reviews.reload}

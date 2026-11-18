@@ -73,6 +73,7 @@ test('user B cannot retrieve user A target reviews through the authenticated rou
     expect(foreign.status).toBe(404);
     expect(foreign.body).toEqual(missing.body);
     expect(JSON.stringify(foreign.body)).not.toContain('Private test fixture');
+    expect(JSON.stringify(foreign.body)).not.toContain('summary');
 });
 
 test('user B cannot import reviews or create review records under user A target', async () => {
@@ -140,6 +141,67 @@ test('owner can read reviews and initiate synchronous import', async () => {
     expect(reviews.status).toBe(200);
     expect(reviews.body.data).toHaveLength(1);
     expect(reviews.body.data[0].text).toBe('Owner review');
+    expect(reviews.body.status).toBe('ready');
+    expect(reviews.body.summary).toEqual({ reviewCount: 1, averageRating: 5 });
+});
+
+test('review route distinguishes expired from never imported data', async () => {
+    const asin = 'B012345678';
+    const fetchedAtMs = Date.now() - 15 * 24 * 60 * 60 * 1000;
+    db = memoryDb({
+        products: { A: { userId: 'user-A', amazonUrl: `https://www.amazon.com/dp/${asin}` } },
+        reviewCaches: {
+            [asin]: {
+                version: 'v1', reviewCount: 1, fetchedAtMs,
+                expiresAtMs: fetchedAtMs + 14 * 24 * 60 * 60 * 1000,
+            },
+        },
+    });
+    verifyIdToken.mockResolvedValue({ uid: 'user-A' });
+    const expired = await request(app).get('/api/products/A/reviews').set('Authorization', 'Bearer token-A');
+    expect(expired.status).toBe(200);
+    expect(expired.body).toEqual({ data: [], status: 'expired', summary: null });
+    await db.collection('reviewCaches').doc(asin).delete();
+    const initial = await request(app).get('/api/products/A/reviews').set('Authorization', 'Bearer token-A');
+    expect(initial.body).toEqual({ data: [], status: 'notImported', summary: null });
+});
+
+test('review route rejects invalid identity and incomplete saved data', async () => {
+    const asin = 'B012345678';
+    const now = Date.now();
+    db = memoryDb({
+        products: { A: { userId: 'user-A', amazonUrl: `https://www.amazon.com/dp/${asin}` } },
+        reviewCaches: {
+            [asin]: { version: 'v1', reviewCount: 2, fetchedAtMs: now, expiresAtMs: now + 14 * 24 * 60 * 60 * 1000 },
+        },
+        reviews: { R1: { asin, cacheVersion: 'v1', text: 'Only one', rating: 3 } },
+    });
+    const missingToken = await request(app).get('/api/products/A/reviews');
+    expect(missingToken.status).toBe(401);
+    verifyIdToken.mockRejectedValueOnce(new Error('bad token'));
+    const invalidToken = await request(app).get('/api/products/A/reviews').set('Authorization', 'Bearer invalid');
+    expect(invalidToken.status).toBe(401);
+    verifyIdToken.mockResolvedValue({ uid: 'user-A' });
+    const malformedId = await request(app).get('/api/products/bad%2Fid/reviews').set('Authorization', 'Bearer token-A');
+    expect(malformedId.status).toBe(400);
+    expect(malformedId.body.error.code).toBe('VALIDATION_ERROR');
+    const incomplete = await request(app).get('/api/products/A/reviews').set('Authorization', 'Bearer token-A');
+    expect(incomplete.status).toBe(503);
+    expect(incomplete.body.error.code).toBe('REVIEW_CACHE_INCOMPLETE');
+    expect(incomplete.body.summary).toBeUndefined();
+});
+
+test('review route treats damaged cache metadata as an error, not expiry', async () => {
+    const asin = 'B012345678';
+    db = memoryDb({
+        products: { A: { userId: 'user-A', amazonUrl: `https://www.amazon.com/dp/${asin}` } },
+        reviewCaches: { [asin]: { version: 'v1', reviewCount: 1, deleting: true } },
+    });
+    verifyIdToken.mockResolvedValue({ uid: 'user-A' });
+    const response = await request(app).get('/api/products/A/reviews').set('Authorization', 'Bearer token-A');
+    expect(response.status).toBe(503);
+    expect(response.body.error.code).toBe('REVIEW_CACHE_UNAVAILABLE');
+    expect(response.body.summary).toBeUndefined();
 });
 
 test('owner can list and retrieve only their target ingestion runs', async () => {
