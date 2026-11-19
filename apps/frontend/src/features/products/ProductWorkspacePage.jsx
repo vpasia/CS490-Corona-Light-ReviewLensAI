@@ -5,10 +5,12 @@ import { ErrorState } from '@/components/ui/error-state';
 import { Skeleton } from '@/components/ui/skeleton';
 import { ApiError } from '@/lib/api.js';
 
+import AskPanel from './AskPanel.jsx';
 import ImportReviewsPanel from './ImportReviewsPanel.jsx';
 import IngestionStatusCard from './IngestionStatusCard.jsx';
 import ReviewSummaryCard from './ReviewSummaryCard.jsx';
 import SavedReviewsList from './SavedReviewsList.jsx';
+import { useAskQuestion } from './useAskQuestion.js';
 import { useImportReviews } from './useImportReviews.js';
 import { useIngestionStatus } from './useIngestionStatus.js';
 import { useProduct } from './useProduct.js';
@@ -30,6 +32,7 @@ function ProductWorkspace({ productId }) {
   const importer = useImportReviews(productId);
   const reviews = useReviews(productId);
   const ingestion = useIngestionStatus(productId);
+  const asker = useAskQuestion(productId);
 
   async function handleImport() {
     const succeeded = await importer.start();
@@ -127,6 +130,17 @@ function ProductWorkspace({ productId }) {
         reviews={reviews.reviews}
         errorMessage={reviews.errorMessage}
         onRetry={reviews.reload}
+      />
+
+      <AskPanel
+        productName={product.productName}
+        reviewsStatus={reviews.status}
+        reviewCount={reviews.reviews.length}
+        status={asker.status}
+        question={asker.question}
+        answer={asker.answer}
+        errorMessage={asker.errorMessage}
+        onAsk={asker.ask}
       />
     </main>
   );
