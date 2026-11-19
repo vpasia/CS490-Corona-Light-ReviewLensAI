@@ -27,6 +27,13 @@ export async function listReviews(productId) {
   };
 }
 
+export async function listIngestionRuns(productId) {
+  const response = await apiRequest(
+    `/api/products/${encodeURIComponent(productId)}/ingestion-runs`,
+  );
+  return response?.data ?? [];
+}
+
 export async function importReviews(productId) {
   const response = await apiRequest(
     `/api/products/${encodeURIComponent(productId)}/import-reviews`,

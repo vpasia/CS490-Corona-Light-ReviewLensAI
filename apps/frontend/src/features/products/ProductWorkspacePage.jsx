@@ -6,9 +6,11 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { ApiError } from '@/lib/api.js';
 
 import ImportReviewsPanel from './ImportReviewsPanel.jsx';
+import IngestionStatusCard from './IngestionStatusCard.jsx';
 import ReviewSummaryCard from './ReviewSummaryCard.jsx';
 import SavedReviewsList from './SavedReviewsList.jsx';
 import { useImportReviews } from './useImportReviews.js';
+import { useIngestionStatus } from './useIngestionStatus.js';
 import { useProduct } from './useProduct.js';
 import { useReviews } from './useReviews.js';
 
@@ -27,9 +29,12 @@ function ProductWorkspace({ productId }) {
   const { status, product, error, retry } = useProduct(productId);
   const importer = useImportReviews(productId);
   const reviews = useReviews(productId);
+  const ingestion = useIngestionStatus(productId);
 
   async function handleImport() {
-    if (await importer.start()) {
+    const succeeded = await importer.start();
+    ingestion.reload();
+    if (succeeded) {
       reviews.reload();
     }
   }
@@ -103,6 +108,13 @@ function ProductWorkspace({ productId }) {
         reviewCount={importer.reviewCount}
         errorMessage={importer.errorMessage}
         onImport={handleImport}
+      />
+
+      <IngestionStatusCard
+        status={ingestion.status}
+        latestRun={ingestion.latestRun}
+        errorMessage={ingestion.errorMessage}
+        onRetry={ingestion.reload}
       />
 
       {reviews.status === 'ready' && reviews.datasetStatus === 'ready' && (
