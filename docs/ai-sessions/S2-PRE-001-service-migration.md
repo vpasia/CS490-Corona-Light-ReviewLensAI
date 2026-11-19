@@ -1,33 +1,35 @@
-# Adapting Tests for Bright Data Service
+# Adapting Tests for SerpAPI Service
 
 - **Tool:** ChatGPT
-- **Date:** 2026-11-14
+- **Date:** 2026-11-18
 - **Tickets:** S2-PRE-001
 - **Branch:** feature/migrate-ingestion
 
-## Prompts and responses (trimmed)
+## 1. Adapting the existing tests
 
-### 1. Adapting the existing tests
-**Prompt (summary):** Asked ChatGPT to adapt the existing Canopy service tests to work with the newly written Bright Data service, keeping the same test logic wherever applicable.
+**Prompt (summary):** Asked ChatGPT to adapt the existing Bright Data service tests to work with the newly migrated SerpAPI service, preserving the same test logic wherever applicable.
 
-**Response (summary):** ChatGPT reviewed the original `canopyService.test.js` and the new `brightDataService.js`. It created a new `brightDataService.test.js` that preserved the relevant tests while adapting them to Bright Data's API workflow. The tests covered review-field mapping, malformed records, supported response formats, invalid URLs, API credentials, HTTP and network errors, and configuration validation.
+**Response (summary):** ChatGPT reviewed the existing `brightDataService.test.js` and the new `serpApiService.js`. It created a new `serpApiService.test.js`, adapting the tests to SerpAPI's direct product-review request workflow.
 
-Because Bright Data uses a dataset-triggering and snapshot-polling workflow rather than Canopy's pagination approach, the pagination tests were replaced with tests for triggering a collection, polling for completion, handling failed snapshots, and timing out while a snapshot remains in progress.
+The tests covered review-field mapping, default values, malformed records, Amazon URL validation, API credentials, request configuration, HTTP and network errors, invalid provider responses, and timeout behavior.
 
-### 2. Fixing failing tests
-**Prompt (summary):** Pasted test failures involving invalid configuration and errors when retrieving Bright Data snapshots.
+Because SerpAPI uses a direct API request rather than Bright Data's dataset-triggering and snapshot-polling workflow, the snapshot tests were removed and replaced with tests for constructing the SerpAPI request, combining review collections, and retrieving review snippets from product insights.
 
-**Response (summary):** ChatGPT identified two issues in the tests and service implementation:
+## 2. Identifying service implementation issues
 
-- **Invalid configuration test:** The test used nullish coalescing (`??`) when selecting a fallback `fetchImpl`. This caused an explicitly supplied `null` value to be replaced by the fallback function. The fix was to check whether the `fetchImpl` property existed instead.
-- **Snapshot URL construction:** The service attempted to use `.searchParams` on a string instead of a `URL` object. The fix was to construct the endpoint using `new URL()` before adding the `format=json` query parameter.
+**Prompt (summary):** Asked ChatGPT to provide the complete adapted test file directly in the chat.
 
-ChatGPT also recommended checking that the trigger endpoint was constructed using a `URL` object and that its dataset and format parameters were added correctly.
+**Response (summary):** ChatGPT provided the full `serpApiService.test.js` code and identified three potential implementation issues in `serpApiService.js`:
+
+- **Timeout variable:** The service references `timeoutMs`, which is undefined. It should use `totalTimeoutMs` when configuring the timeout.
+- **Request method:** The service references an undefined `method` variable. It should explicitly use `'GET'` for the SerpAPI request.
+- **Insight snippet mapping:** The snippet mapping uses `{ text: example.snippet }` without returning the object. It should use `({ text: example.snippet })` so the snippets are included in the resulting collection.
 
 ## What was kept, changed, or rejected
 
-- **Kept:** The original Canopy tests' core logic wherever it applied, including review mapping, malformed data handling, credential validation, provider errors, and timeout behavior.
-- **Changed:** Reworked provider-specific tests to match Bright Data's trigger, snapshot polling, and result retrieval workflow. Replaced pagination tests with snapshot-related tests.
-- **Fixed:** Updated the invalid-configuration test to preserve explicitly supplied null values and corrected snapshot URL construction.
-- **Not yet confirmed:** The conversation ended with a recommendation to rerun `npm test -- brightDataService.test.js`. No final successful test output was provided.
-- **Secrets / user data:** No secrets or personal user data were included in the test examples.
+- **Kept:** The original Bright Data tests' core logic wherever applicable, including Amazon URL validation, review mapping, malformed records, credential validation, HTTP errors, network failures, and configuration validation.
+- **Changed:** Adapted provider-specific tests to match SerpAPI's direct request workflow. Added tests for request parameters, combining author reviews and international reviews, extracting insight snippets, and using the environment API key.
+- **Removed:** Bright Data-specific dataset triggering, snapshot polling, failed snapshot, and polling timeout tests because these workflows do not apply to SerpAPI.
+- **Fixed / identified:** Identified the undefined timeout and request method variables and the missing return in the insight snippet mapping.
+- **Not yet confirmed:** The conversation ended without running `npm test -- serpApiService.test.js`. No successful test output was provided.
+- **Secrets / user data:** No actual API keys or personal user data were included in the test examples; placeholder credentials were used.
