@@ -12,7 +12,7 @@ jest.unstable_mockModule('../../src/config/firebaseAdmin.js', () => ({
     getDb: () => db,
     getFirebaseAuth,
 }));
-jest.unstable_mockModule('../../src/services/brightDataService.js', () => ({
+jest.unstable_mockModule('../../src/services/serpApiService.js', () => ({
     fetchSerpApiReviews,
 }));
 

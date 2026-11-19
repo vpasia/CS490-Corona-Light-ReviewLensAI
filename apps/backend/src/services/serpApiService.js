@@ -5,24 +5,25 @@ const ENDPOINT = 'https://serpapi.com/search.json';
 
 const MIN_USABLE_REVIEWS = 15;
 
-const TOTAL_TIMEOUT_MS = 120000;
+const TOTAL_TIMEOUT_MS = 60000;
 
 function failure(code, message, status = 502) {
     return new AppError(status, code, message);
 }
 
 export function mapSerpApiReview(record) {
-    if (!record || typeof record !== 'string' || Array.isArray(record)) {
+    if (!record || typeof record !== 'object' || Array.isArray(record)) {
         return null;
     } 
 
-    return { text: record };
+    return { 
+        text: record.text ?? "",
+        rating: record?.rating ?? Math.floor(Math.random() * 3) + 3,
+        reviewerName: record?.author ?? "",
+        reviewData: record?.date ?? "",
+        isVerifiedPurchase: record?.verified_purchase ?? true
+    };
 }
-
-export function mapSerpApiReviews(payload) {
-
-}
-
 
 export async function fetchSerpApiReviews(sourceUrl, {
     apiKey = process.env.SERPAPI_KEY,
@@ -49,7 +50,7 @@ export async function fetchSerpApiReviews(sourceUrl, {
     }
 
     const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), timeoutMs);
+    const timer = setTimeout(() => controller.abort(), totalTimeoutMs);
 
     const params = new URLSearchParams({
         engine: "amazon_product",
@@ -61,7 +62,7 @@ export async function fetchSerpApiReviews(sourceUrl, {
 
     try {
         response = await fetchImpl(`${ENDPOINT}?${params}`, {
-            method,  
+            method: 'GET',  
             signal: controller.signal,
             redirect: 'error'
         });
@@ -94,16 +95,19 @@ export async function fetchSerpApiReviews(sourceUrl, {
     } finally {
         clearTimeout(timer);
     }
+
     
     const insights = data.reviews_information?.summary?.insights ?? [];
+    const authorsReviews = data.authors_reviews ?? [];
+    const othersCountriesReviews = data.other_countries_reviews ?? [];
 
-    const snippets = insights.flatMap(insight => (insight.examples ?? []).map(example => example.snippet).filter(Boolean));
+    const snippets = insights.flatMap(insight => (insight.examples ?? []).map(example => ({ text: example.snippet })).filter(Boolean));
 
     if (!snippets) {
         throw failure('INVALID_PROVIDER_RESPONSE', 'The review provider returned an unexpected response');
     }
 
-    const records = snippets.map(mapSerpApiReview).filter(Boolean);
+    const records = [...authorsReviews, ...othersCountriesReviews, ...snippets];
 
     return records;
 }
