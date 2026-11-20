@@ -10,6 +10,7 @@ import ImportReviewsPanel from './ImportReviewsPanel.jsx';
 import IngestionStatusCard from './IngestionStatusCard.jsx';
 import ReviewSummaryCard from './ReviewSummaryCard.jsx';
 import SavedReviewsList from './SavedReviewsList.jsx';
+import TargetSwitcher from './TargetSwitcher.jsx';
 import { useAskQuestion } from './useAskQuestion.js';
 import { useImportReviews } from './useImportReviews.js';
 import { useIngestionStatus } from './useIngestionStatus.js';
@@ -103,6 +104,8 @@ function ProductWorkspace({ productId }) {
           )}
         </p>
       </header>
+
+      <TargetSwitcher currentProductId={productId} />
 
       <ImportReviewsPanel
         status={importer.status}
