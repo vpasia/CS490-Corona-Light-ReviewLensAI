@@ -6,6 +6,7 @@ const REVIEW_QA_INSTRUCTIONS = [
     'Report what reviewers say. Do not invent details or use outside knowledge to fill gaps.',
     'If a question is in scope but the reviews do not support an answer, say what evidence is missing.',
     'Politely decline unrelated requests, including general-knowledge questions and requests about another product, entity, or platform.',
+    'Answer comparisons only when the supplied reviews contain the evidence needed for the comparison. Decline comparisons that require evidence from outside the active dataset.',
     'When declining, explain that you can help with the active target’s supplied reviews and invite a question about them.',
 ].join('\n');
 

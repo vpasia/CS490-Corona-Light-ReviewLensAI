@@ -1,0 +1,22 @@
+[
+    {
+        "name": "another product",
+        "question": "What do customers think about a product that is not included in the provided Amazon product data?",
+        "expected_result_kind": "out_of_scope"
+    },
+    {
+        "name": "another platform",
+        "question": "What do Walmart customers say about this product?",
+        "expected_result_kind": "out_of_scope"
+    },
+    {
+        "name": "comparison requiring external reviews",
+        "question": "Based on Amazon reviews, how does the SoundTrail H1 compare with the SoundTrail H2 for battery life?",
+        "expected_result_kind": "out_of_scope"
+    },
+    {
+        "name": "grounded recurring review themes",
+        "question": "What complaints do customers mention repeatedly in the reviews?",
+        "expected_result_kind": "grounded"
+    }
+]
