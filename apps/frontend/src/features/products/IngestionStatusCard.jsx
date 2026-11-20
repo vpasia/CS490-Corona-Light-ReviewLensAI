@@ -3,6 +3,8 @@ import { CircleAlert, CircleCheck, LoaderCircle } from 'lucide-react';
 import { ErrorState } from '@/components/ui/error-state';
 import { Skeleton } from '@/components/ui/skeleton';
 
+import ImportResultCounts from './ImportResultCounts.jsx';
+
 function describeRun(run) {
   if (!run) {
     return {
@@ -113,6 +115,7 @@ export default function IngestionStatusCard({ status, latestRun, errorMessage, o
         errorMessage={errorMessage}
         onRetry={onRetry}
       />
+      {status === 'ready' && <ImportResultCounts run={latestRun} />}
     </section>
   );
 }
