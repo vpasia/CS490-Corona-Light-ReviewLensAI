@@ -17,10 +17,10 @@ export function mapSerpApiReview(record) {
     } 
 
     return { 
-        text: record.text ?? "",
-        rating: record?.rating ?? Math.floor(Math.random() * 3) + 3,
+        text: record.text,
+        rating: record?.rating ?? 3,
         reviewerName: record?.author ?? "",
-        reviewData: record?.date ?? "",
+        reviewDate: record?.date ?? "",
         isVerifiedPurchase: record?.verified_purchase ?? true
     };
 }
@@ -98,8 +98,8 @@ export async function fetchSerpApiReviews(sourceUrl, {
 
     
     const insights = data.reviews_information?.summary?.insights ?? [];
-    const authorsReviews = data.authors_reviews ?? [];
-    const othersCountriesReviews = data.other_countries_reviews ?? [];
+    const authorsReviews = data.reviews_information?.authors_reviews ?? [];
+    const othersCountriesReviews = data.reviews_information?.other_countries_reviews ?? [];
 
     const snippets = insights.flatMap(insight => (insight.examples ?? []).map(example => ({ text: example.snippet })).filter(Boolean));
 
@@ -107,7 +107,7 @@ export async function fetchSerpApiReviews(sourceUrl, {
         throw failure('INVALID_PROVIDER_RESPONSE', 'The review provider returned an unexpected response');
     }
 
-    const records = [...authorsReviews, ...othersCountriesReviews, ...snippets];
+    const records = [...authorsReviews, ...othersCountriesReviews, ...snippets].map(mapSerpApiReview).filter(Boolean);
 
     return records;
 }

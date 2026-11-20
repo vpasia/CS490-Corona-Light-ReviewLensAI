@@ -20,24 +20,6 @@ const response = (body, status = 200) => ({
 });
 
 const productPayload = (overrides = {}) => ({
-    authors_reviews: [
-        {
-            text: 'A useful review',
-            rating: 5,
-            author: 'Reader',
-            date: 'January 1, 2026',
-            verified_purchase: true,
-        },
-    ],
-    other_countries_reviews: [
-        {
-            text: 'A review from another country',
-            rating: 4,
-            author: 'Another reader',
-            date: 'February 1, 2026',
-            verified_purchase: false,
-        },
-    ],
     reviews_information: {
         summary: {
             insights: [
@@ -49,6 +31,24 @@ const productPayload = (overrides = {}) => ({
                 },
             ],
         },
+        authors_reviews: [
+            {
+                text: 'A useful review',
+                rating: 5,
+                author: 'Reader',
+                date: 'January 1, 2026',
+                verified_purchase: true,
+            },
+        ],
+        other_countries_reviews: [
+            {
+                text: 'A review from another country',
+                rating: 4,
+                author: 'Another reader',
+                date: 'February 1, 2026',
+                verified_purchase: false,
+            },
+        ]
     },
     ...overrides,
 });
@@ -67,7 +67,7 @@ describe('SerpAPI review mapping', () => {
                 text: ' Good sound ',
                 rating: 5,
                 reviewerName: 'Reader',
-                reviewData: 'January 1, 2026',
+                reviewDate: 'January 1, 2026',
                 isVerifiedPurchase: true,
             }
         );
@@ -78,7 +78,7 @@ describe('SerpAPI review mapping', () => {
 
         assert.equal(mapped.text, 'A review');
         assert.equal(mapped.reviewerName, '');
-        assert.equal(mapped.reviewData, '');
+        assert.equal(mapped.reviewDate, '');
         assert.equal(mapped.isVerifiedPurchase, true);
         assert.ok(mapped.rating >= 3 && mapped.rating <= 5);
     });
@@ -135,19 +135,19 @@ describe('SerpAPI review fetching', () => {
                 assert.equal(init.redirect, 'error');
 
                 return response({
-                    authors_reviews: [{ text: 'Review R1', rating: 5 }],
-                    other_countries_reviews: [],
                     reviews_information: {
                         summary: {
                             insights: [],
                         },
+                        authors_reviews: [{ text: 'Review R1', rating: 5 }],
+                        other_countries_reviews: []
                     },
                 });
             },
         });
 
         assert.deepEqual(records, [
-            { text: 'Review R1', rating: 5 },
+            mapSerpApiReview({ text: 'Review R1', rating: 5 }),
         ]);
     });
 
@@ -162,13 +162,13 @@ describe('SerpAPI review fetching', () => {
         assert.equal(records.length, 4);
 
         assert.deepEqual(records.slice(0, 2), [
-            payload.authors_reviews[0],
-            payload.other_countries_reviews[0],
+            mapSerpApiReview(payload.reviews_information.authors_reviews[0]),
+            mapSerpApiReview(payload.reviews_information.other_countries_reviews[0]),
         ]);
 
         assert.deepEqual(records.slice(2), [
-            { text: 'A recurring positive theme' },
-            { text: 'Another customer observation' },
+            mapSerpApiReview({ text: 'A recurring positive theme' }),
+            mapSerpApiReview({ text: 'Another customer observation' }),
         ]);
     });
 
