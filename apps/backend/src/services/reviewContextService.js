@@ -97,12 +97,16 @@ export async function buildReviewContext(
               ? 1
               : 0
     );
+    const sourceReviews = Object.freeze(
+        reviews.map((review) => Object.freeze(review))
+    );
 
     const fullCount = await measuredCount(reviews, countTokens);
     if (fullCount <= tokenLimit) {
         return Object.freeze({
             productId,
             sourceReviewCount: reviews.length,
+            sourceReviews,
             batches: Object.freeze([batch(reviews, fullCount, 1)]),
         });
     }
@@ -157,6 +161,7 @@ export async function buildReviewContext(
     return Object.freeze({
         productId,
         sourceReviewCount: reviews.length,
+        sourceReviews,
         batches: Object.freeze(batches),
     });
 }

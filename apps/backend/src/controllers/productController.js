@@ -5,6 +5,7 @@ import {
 } from '../services/productService.js';
 import { getOwnedProduct } from '../services/ownership.js';
 import { getReviewDataset } from '../services/reviewService.js';
+import { answerQuestion } from '../services/qaService.js';
 import { importReviews } from '../services/ingestionService.js';
 import {
     getIngestionRun,
@@ -44,6 +45,15 @@ export async function getProductReviews(req, res) {
         req.params.productId
     );
     res.status(200).json({ data: reviews, status, summary });
+}
+
+export async function analyzeProduct(req, res) {
+    const answer = await answerQuestion(
+        req.user.uid,
+        req.params.productId,
+        req.body.question
+    );
+    res.status(200).json({ data: { answer } });
 }
 
 export async function importProductReviews(req, res) {
