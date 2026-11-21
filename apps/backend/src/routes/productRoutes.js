@@ -8,10 +8,12 @@ import {
     getProductIngestionRun,
     getProductIngestionRuns,
     removeProduct,
+    analyzeProduct,
 } from '../controllers/productController.js';
 import { validateProductId } from '../middleware/validateProductId.js';
 import { validateProductInput } from '../middleware/validateProductInput.js';
 import { validateIngestionRunId } from '../middleware/validateIngestionRunId.js';
+import { validateQuestion } from '../middleware/validateQuestion.js';
 
 const router = Router();
 router.get('/', getProducts);
@@ -19,6 +21,12 @@ router.post('/', validateProductInput, addProduct);
 router.get('/:productId', validateProductId, getProduct);
 router.delete('/:productId', validateProductId, removeProduct);
 router.get('/:productId/reviews', validateProductId, getProductReviews);
+router.post(
+    '/:productId/analyze',
+    validateProductId,
+    validateQuestion,
+    analyzeProduct
+);
 router.post(
     '/:productId/import-reviews',
     validateProductId,
