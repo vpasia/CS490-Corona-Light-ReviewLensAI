@@ -1,10 +1,18 @@
 # S2-016 — Keep other users' reviews out of Q&A context
 
+## Shared route integration — November 21, 2026
+
+Codex replaced the earlier service-composition test with checks at the authenticated `/analyze` route. The merged QA service already uses the ownership-checked loader. The route tests seed distinct active review caches for two owners and mock Firebase token verification and Gemini HTTP responses. The real route, context loader, service, and adapter run in the tests.
+
+A foreign-target request returns the same HTTP 404 as a missing target. The test verifies that only product lookups occurred and that neither token counting nor generation was called, even when the body supplied another UID and ASIN. Each owner can analyze their own target. The captured provider request contains that target's review and excludes the other dataset. A signed-in browser run against a test account remains pending.
+
+Backend lint and all 250 coverage tests passed. Line coverage was 93.80% and branch coverage was 90.73%.
+
 **Tool and date:** Codex, November 20, 2026
 
 **Request:** Implement [issue #59](https://github.com/vpasia/CS490-Corona-Light-ReviewLensAI/issues/59). Use two synthetic users and capture the payload at a mocked model boundary to verify review isolation.
 
-**What changed and why:** Added [service-boundary tests](../../apps/backend/tests/services/reviewQaOwnership.test.js) using the existing in-memory Firestore double, the ownership-checked `getReviewDataset` loader, `getOwnedProduct`, and the real `buildReviewQaRequest`. The two users own targets with different Amazon ASINs and distinctive synthetic review phrases. The test composes those services and a mocked generation call because the shared Q&A route is pending.
+**Initial implementation:** Before the shared route landed, `reviewQaOwnership.test.js` used the in-memory Firestore double, the ownership-checked `getReviewDataset` loader, `getOwnedProduct`, and the real `buildReviewQaRequest`. The two users owned targets with different Amazon ASINs and distinctive synthetic review phrases. The authenticated route tests above now replace that service-composition test.
 
 **What the tests proved**
 

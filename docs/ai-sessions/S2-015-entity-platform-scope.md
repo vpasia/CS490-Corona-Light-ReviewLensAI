@@ -1,5 +1,11 @@
 # S2-015 — Questions about another product or platform
 
+## Shared route integration — November 21, 2026
+
+Codex brought this branch onto the updated S2-013/014 branch. The comparison rule now reaches the app's structured Gemini adapter through the shared scope prompt. The four fixture cases run through authenticated `/analyze` requests in the route suite. The tests inspect the Gemini request body and verify that the three refusals return HTTP 200 with `data.outOfScope: true` and the control returns a grounded answer.
+
+The recorded Flash-Lite replies below came from the earlier free-text smoke run. The integrated route uses the configured Gemini 3.8 Flash model. Its live synthetic probe timed out during generation, so the updated structured replies are verified with mocked provider responses. See the [S2-013 live probe record](S2-013-review-qa-prompt.md#shared-flow-integration--november-21-2026).
+
 **Tool and date:** Codex, November 20, 2026
 
 **Request:** Implement [issue #58](https://github.com/vpasia/CS490-Corona-Light-ReviewLensAI/issues/58). Reuse the review Q&A builder and shared evaluation cases. Exercise another product, another platform, a comparison that needs outside evidence, and an in-scope control.
