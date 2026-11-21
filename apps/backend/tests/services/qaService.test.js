@@ -65,6 +65,8 @@ function classify(question, evidence) {
                       {
                           theme: 'Stopped working',
                           kind: 'complaint',
+                          evidenceRelation: 'direct',
+                          stance: 'not_applicable',
                           excerpt: 'stopped working',
                       },
                   ]
@@ -77,7 +79,430 @@ function options(db, analyzeBatch = jest.fn(classify), tokenLimit = 10000) {
     return { db, analyzeBatch, countTokens: countCharacters, tokenLimit };
 }
 
+const PARKING_QUESTION = 'Do customers think the parking lot is safe at night?';
+
+function parkingDataset(relevantTexts) {
+    return setup([
+        ...relevantTexts,
+        ...Array.from(
+            { length: 15 - relevantTexts.length },
+            (_, index) => `Review ${index + 1} discusses food quality only.`
+        ),
+    ]);
+}
+
+async function parkingAnalysis(_question, evidence) {
+    return {
+        reviews: JSON.parse(evidence).reviews.map((record) => {
+            const findings = [];
+            for (const [phrase, evidenceRelation, stance, kind] of [
+                ['well lit', 'related', 'not_applicable', 'other'],
+                ['felt unsafe', 'direct', 'opposes', 'complaint'],
+                ['felt safe', 'direct', 'supports', 'other'],
+            ]) {
+                if (record.text.includes(phrase))
+                    findings.push({
+                        theme: phrase,
+                        kind,
+                        evidenceRelation,
+                        stance,
+                        excerpt: phrase,
+                    });
+            }
+            return {
+                reviewId: record.reviewId,
+                partIndex: record.partIndex ?? 0,
+                themes: findings,
+            };
+        }),
+    };
+}
+
 describe('answers from owned saved review evidence', () => {
+    it('does not add a product-claim warning to an open-ended theme answer', async () => {
+        const answer = await answerQuestion(
+            'owner',
+            'owned',
+            'What complaints appeared?',
+            options(setup(['The item stopped working.']))
+        );
+        expect(answer).toContain('1 of 1 saved review directly addresses');
+        expect(answer).not.toContain(
+            'independent proof of a product or safety claim'
+        );
+    });
+
+    it('states when no saved review addresses the asked topic', async () => {
+        const answer = await answerQuestion(
+            'owner',
+            'owned',
+            PARKING_QUESTION,
+            options(parkingDataset([]), jest.fn(parkingAnalysis))
+        );
+        expect(answer).toContain('0 of 15 saved reviews');
+        expect(answer).toContain(PARKING_QUESTION);
+        expect(answer).toMatch(/do not|cannot/);
+    });
+
+    it('distinguishes related lighting reports from direct safety reports', async () => {
+        const answer = await answerQuestion(
+            'owner',
+            'owned',
+            PARKING_QUESTION,
+            options(
+                parkingDataset([
+                    'The parking lot is well lit.',
+                    'It was well lit outside.',
+                ]),
+                jest.fn(parkingAnalysis)
+            )
+        );
+        expect(answer).toContain('0 of 15 saved reviews');
+        expect(answer).toContain('2 related reviews');
+        expect(answer).toContain('well lit');
+        expect(answer).toContain(PARKING_QUESTION);
+        expect(answer).not.toMatch(/the parking lot is safe at night\./i);
+    });
+
+    it('reports both direct safety experiences without claiming general safety', async () => {
+        const answer = await answerQuestion(
+            'owner',
+            'owned',
+            PARKING_QUESTION,
+            options(
+                parkingDataset([
+                    'I felt safe in the parking lot at night.',
+                    'I felt safe walking to my car at night.',
+                ]),
+                jest.fn(parkingAnalysis)
+            )
+        );
+        expect(answer).toContain('2 of 15 saved reviews');
+        expect(answer).toMatch(/both.*felt safe/i);
+        expect(answer).toContain(PARKING_QUESTION);
+        expect(answer).toMatch(/do not|cannot/);
+    });
+
+    it('limits an open-ended safety question when only two reviews address it', async () => {
+        const question = 'How safe is the parking lot at night?';
+        const answer = await answerQuestion(
+            'owner',
+            'owned',
+            question,
+            options(
+                parkingDataset([
+                    'I felt safe in the parking lot at night.',
+                    'I felt safe walking to my car at night.',
+                ]),
+                jest.fn(parkingAnalysis)
+            )
+        );
+        expect(answer).toContain('2 of 15 saved reviews');
+        expect(answer).toContain(question);
+        expect(answer).toMatch(
+            /do not establish.*safety|do not establish.*overall/i
+        );
+    });
+
+    it('does not deny an overall reviewer-opinion answer from broad coverage', async () => {
+        const answer = await answerQuestion(
+            'owner',
+            'owned',
+            PARKING_QUESTION,
+            options(
+                parkingDataset(
+                    Array.from({ length: 14 }, () => 'I felt safe at night.')
+                ),
+                jest.fn(parkingAnalysis)
+            )
+        );
+        expect(answer).toContain('14 of 15 saved reviews');
+        expect(answer).toMatch(/most of the reviewers who discussed/i);
+        expect(answer).not.toContain('do not establish an overall answer');
+    });
+
+    it('does not attribute one supporting theme to reviewers who used different words', async () => {
+        const db = parkingDataset([
+            'I felt safe walking there at night.',
+            'I was comfortable walking there at night.',
+        ]);
+        const analyzeBatch = jest.fn(async (_question, evidence) => ({
+            reviews: JSON.parse(evidence).reviews.map((record) => {
+                const phrase = record.text.includes('felt safe')
+                    ? 'felt safe'
+                    : record.text.includes('comfortable')
+                      ? 'comfortable'
+                      : null;
+                return {
+                    reviewId: record.reviewId,
+                    partIndex: record.partIndex ?? 0,
+                    themes: phrase
+                        ? [
+                              {
+                                  theme: phrase,
+                                  kind: 'other',
+                                  evidenceRelation: 'direct',
+                                  stance: 'supports',
+                                  excerpt: phrase,
+                              },
+                          ]
+                        : [],
+                };
+            }),
+        }));
+        const answer = await answerQuestion(
+            'owner',
+            'owned',
+            PARKING_QUESTION,
+            options(db, analyzeBatch)
+        );
+        expect(answer).toContain('2 of 15 saved reviews');
+        expect(answer).toMatch(/both reviewers who discussed/i);
+        expect(answer).not.toContain(
+            'Both reviewers who discussed this topic reported "felt safe"'
+        );
+    });
+
+    it('reports conflicting direct safety experiences', async () => {
+        const answer = await answerQuestion(
+            'owner',
+            'owned',
+            PARKING_QUESTION,
+            options(
+                parkingDataset([
+                    'I felt safe in the parking lot at night.',
+                    'I felt unsafe in the parking lot at night.',
+                ]),
+                jest.fn(parkingAnalysis)
+            )
+        );
+        expect(answer).toContain('2 of 15 saved reviews');
+        expect(answer).toMatch(/conflict|disagree/i);
+        expect(answer).toContain('felt safe');
+        expect(answer).toContain('felt unsafe');
+    });
+
+    it('limits a reviewer-opinion majority to those who discussed it', async () => {
+        const answer = await answerQuestion(
+            'owner',
+            'owned',
+            PARKING_QUESTION,
+            options(
+                parkingDataset([
+                    ...Array.from({ length: 8 }, () => 'I felt safe at night.'),
+                    'I felt unsafe at night.',
+                ]),
+                jest.fn(parkingAnalysis)
+            )
+        );
+        expect(answer).toContain('9 of 15 saved reviews');
+        expect(answer).toMatch(/most of the reviewers who discussed/i);
+        expect(answer).not.toMatch(/most reviewers felt safe/i);
+    });
+
+    it('counts one review with direct and related evidence once', async () => {
+        const answer = await answerQuestion(
+            'owner',
+            'owned',
+            PARKING_QUESTION,
+            options(
+                parkingDataset([
+                    'The parking lot was well lit and I felt safe at night.',
+                    'I felt safe at night.',
+                ]),
+                jest.fn(parkingAnalysis)
+            )
+        );
+        expect(answer).toContain('2 of 15 saved reviews');
+        expect(answer).not.toContain('1 related review');
+        expect(answer).toContain('Related observation: well lit');
+    });
+
+    it.each([
+        'Did any reviewer feel safe in the parking lot at night?',
+        'Did any reviewers feel safe in the parking lot at night?',
+    ])('answers an existential reviewer question: %s', async (question) => {
+        const answer = await answerQuestion(
+            'owner',
+            'owned',
+            question,
+            options(
+                parkingDataset(['I felt safe in the parking lot at night.']),
+                jest.fn(parkingAnalysis)
+            )
+        );
+        expect(answer).toContain('1 of 15 saved reviews');
+        expect(answer).toContain('felt safe');
+        expect(answer).not.toContain('do not establish an overall answer');
+    });
+
+    it('states when direct reports include a mixed account', async () => {
+        const db = parkingDataset([
+            'I felt safe walking there at night.',
+            'I had mixed feelings walking there at night.',
+        ]);
+        const analyzeBatch = jest.fn(async (_question, evidence) => ({
+            reviews: JSON.parse(evidence).reviews.map((record) => {
+                const phrase = record.text.includes('felt safe')
+                    ? 'felt safe'
+                    : record.text.includes('mixed feelings')
+                      ? 'mixed feelings'
+                      : null;
+                return {
+                    reviewId: record.reviewId,
+                    partIndex: record.partIndex ?? 0,
+                    themes: phrase
+                        ? [
+                              {
+                                  theme: phrase,
+                                  kind: 'other',
+                                  evidenceRelation: 'direct',
+                                  stance:
+                                      phrase === 'felt safe'
+                                          ? 'supports'
+                                          : 'mixed',
+                                  excerpt: phrase,
+                              },
+                          ]
+                        : [],
+                };
+            }),
+        }));
+        const answer = await answerQuestion(
+            'owner',
+            'owned',
+            PARKING_QUESTION,
+            options(db, analyzeBatch)
+        );
+        expect(answer).toMatch(/1 of 2.*mixed/i);
+    });
+
+    it('keeps unanimous reviewer safety reports distinct from independent safety proof', async () => {
+        const question = 'Is the parking lot safe at night?';
+        const answer = await answerQuestion(
+            'owner',
+            'owned',
+            question,
+            options(
+                setup(
+                    Array.from({ length: 15 }, () => 'I felt safe at night.')
+                ),
+                jest.fn(parkingAnalysis)
+            )
+        );
+        expect(answer).toContain('15 of 15 saved reviews');
+        expect(answer).toMatch(/reviewer reports.*do not establish.*safety/i);
+    });
+
+    it('rejects a direct safety report without a stance for a yes-or-no question', async () => {
+        const db = setup(['I felt safe in the parking lot at night.']);
+        const analyzeBatch = jest.fn().mockResolvedValue({
+            reviews: [
+                {
+                    reviewId: 'review-1',
+                    partIndex: 0,
+                    themes: [
+                        {
+                            theme: 'felt safe',
+                            kind: 'other',
+                            evidenceRelation: 'direct',
+                            stance: 'not_applicable',
+                            excerpt: 'felt safe',
+                        },
+                    ],
+                },
+            ],
+        });
+        await expect(
+            answerQuestion(
+                'owner',
+                'owned',
+                'Is the parking lot safe at night?',
+                options(db, analyzeBatch)
+            )
+        ).rejects.toMatchObject({
+            code: 'UPSTREAM_PROVIDER_ERROR',
+            status: 502,
+        });
+    });
+
+    it.each([
+        ['opposes', 'I felt unsafe at night.', 'opposing'],
+        ['mixed', 'I had mixed feelings at night.', 'mixed'],
+    ])(
+        'summarizes two %s reviewer reports',
+        async (stance, reviewText, wording) => {
+            const phrase =
+                stance === 'opposes' ? 'felt unsafe' : 'mixed feelings';
+            const analyzeBatch = jest.fn(async (_question, evidence) => ({
+                reviews: JSON.parse(evidence).reviews.map((record) => ({
+                    reviewId: record.reviewId,
+                    partIndex: record.partIndex ?? 0,
+                    themes: record.text.includes(phrase)
+                        ? [
+                              {
+                                  theme: phrase,
+                                  kind:
+                                      stance === 'opposes'
+                                          ? 'complaint'
+                                          : 'other',
+                                  evidenceRelation: 'direct',
+                                  stance,
+                                  excerpt: phrase,
+                              },
+                          ]
+                        : [],
+                })),
+            }));
+            const answer = await answerQuestion(
+                'owner',
+                'owned',
+                PARKING_QUESTION,
+                options(parkingDataset([reviewText, reviewText]), analyzeBatch)
+            );
+            expect(answer).toContain('2 of 15 saved reviews');
+            expect(answer).toMatch(
+                new RegExp(`both reviewers.*${wording}`, 'i')
+            );
+        }
+    );
+
+    it('counts one direct complaint theme across different stance labels', async () => {
+        const db = setup([
+            ...Array.from({ length: 4 }, () => 'The battery stopped working.'),
+            'No complaint about the battery.',
+        ]);
+        const analyzeBatch = jest.fn(async (_question, evidence) => ({
+            reviews: JSON.parse(evidence).reviews.map((record) => {
+                const index = Number(record.reviewId.split('-')[1]);
+                return {
+                    reviewId: record.reviewId,
+                    partIndex: record.partIndex ?? 0,
+                    themes:
+                        index <= 4
+                            ? [
+                                  {
+                                      theme: 'stopped working',
+                                      kind: 'complaint',
+                                      evidenceRelation: 'direct',
+                                      stance:
+                                          index <= 2 ? 'supports' : 'opposes',
+                                      excerpt: 'stopped working',
+                                  },
+                              ]
+                            : [],
+                };
+            }),
+        }));
+        const answer = await answerQuestion(
+            'owner',
+            'owned',
+            'What complaints appear?',
+            options(db, analyzeBatch)
+        );
+        expect(answer).toContain('Frequent complaint: stopped working: 4 of 5');
+    });
+
     it.each([
         [2, 15, false],
         [4, 15, true],
@@ -153,6 +578,7 @@ describe('answers from owned saved review evidence', () => {
         );
         expect(analyzeBatch.mock.calls.length).toBeGreaterThan(2);
         expect(answer).toContain('2 of 2 saved reviews');
+        expect(answer).toContain('2 of 2 saved reviews directly address');
         expect(answer).not.toContain('3 of 2');
     });
 
@@ -172,6 +598,8 @@ describe('answers from owned saved review evidence', () => {
                             theme:
                                 context.existingThemes[0] ?? 'stopped working',
                             kind: 'complaint',
+                            evidenceRelation: 'direct',
+                            stance: 'not_applicable',
                             excerpt: record.text.includes('quit')
                                 ? 'quit after a week'
                                 : 'stopped working',
@@ -206,6 +634,8 @@ describe('answers from owned saved review evidence', () => {
                     {
                         theme: 'stopped working',
                         kind: 'complaint',
+                        evidenceRelation: 'direct',
+                        stance: 'not_applicable',
                         excerpt: record.text.includes('quit')
                             ? 'quit after a week'
                             : 'stopped working',
@@ -258,6 +688,8 @@ describe('answers from owned saved review evidence', () => {
                     {
                         theme: 'love the fit',
                         kind: 'other',
+                        evidenceRelation: 'direct',
+                        stance: 'not_applicable',
                         excerpt: 'love the fit',
                     },
                 ],
@@ -463,6 +895,8 @@ describe('answers from owned saved review evidence', () => {
                                     {
                                         theme: 'Frequent breakdowns',
                                         kind: 'complaint',
+                                        evidenceRelation: 'direct',
+                                        stance: 'not_applicable',
                                         excerpt: 'works well',
                                     },
                                 ],
@@ -470,6 +904,41 @@ describe('answers from owned saved review evidence', () => {
                         ],
                     })
                 )
+            )
+        ).rejects.toMatchObject({
+            code: 'UPSTREAM_PROVIDER_ERROR',
+            status: 502,
+        });
+    });
+
+    it.each([
+        { evidenceRelation: 'unknown', stance: 'not_applicable' },
+        { evidenceRelation: 'related', stance: 'supports' },
+        { evidenceRelation: 'direct', stance: 'unknown' },
+    ])('rejects invalid evidence classification %j', async (classification) => {
+        const db = setup(['The parking lot is well lit.']);
+        const analyzeBatch = jest.fn().mockResolvedValue({
+            reviews: [
+                {
+                    reviewId: 'review-1',
+                    partIndex: 0,
+                    themes: [
+                        {
+                            theme: 'parking lot',
+                            kind: 'other',
+                            excerpt: 'parking lot is well lit',
+                            ...classification,
+                        },
+                    ],
+                },
+            ],
+        });
+        await expect(
+            answerQuestion(
+                'owner',
+                'owned',
+                'Is the parking lot safe at night?',
+                options(db, analyzeBatch)
             )
         ).rejects.toMatchObject({
             code: 'UPSTREAM_PROVIDER_ERROR',

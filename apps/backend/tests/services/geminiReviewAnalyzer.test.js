@@ -8,6 +8,8 @@ const finding = {
         {
             theme: 'stopped working',
             kind: 'complaint',
+            evidenceRelation: 'direct',
+            stance: 'not_applicable',
             excerpt: 'stopped after a month',
         },
     ],
@@ -51,6 +53,18 @@ describe('Gemini review analysis', () => {
         expect(body.contents[0].parts[0].text).toContain('stopped working');
         expect(body.generationConfig.responseMimeType).toBe('application/json');
         expect(body.generationConfig.responseJsonSchema).toBeDefined();
+        const themeSchema =
+            body.generationConfig.responseJsonSchema.properties.reviews.items
+                .properties.themes.items;
+        expect(themeSchema.required).toEqual(
+            expect.arrayContaining(['evidenceRelation', 'stance'])
+        );
+        expect(themeSchema.properties.evidenceRelation.enum).toEqual([
+            'direct',
+            'related',
+        ]);
+        expect(body.systemInstruction.parts[0].text).toMatch(/direct|related/i);
+        expect(body.systemInstruction.parts[0].text).toMatch(/absent|none/i);
         expect(body.generationConfig.maxOutputTokens).toBe(2048);
     });
 

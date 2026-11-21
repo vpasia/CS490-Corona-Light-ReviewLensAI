@@ -75,6 +75,8 @@ beforeEach(() => {
                     {
                         theme: 'stopped working',
                         kind: 'complaint',
+                        evidenceRelation: 'direct',
+                        stance: 'not_applicable',
                         excerpt: 'stopped working',
                     },
                 ],
@@ -99,6 +101,22 @@ test('returns a grounded answer for an owned active product', async () => {
         expect.any(String),
         { existingThemes: [] }
     );
+});
+
+test('returns an insufficient-evidence answer as a normal success', async () => {
+    analyzeReviewBatch.mockResolvedValue({
+        reviews: [{ reviewId: 'saved', partIndex: 0, themes: [] }],
+    });
+    const question = 'Is the parking lot safe at night?';
+    const response = await request(app)
+        .post('/api/products/owned/analyze')
+        .set('Authorization', 'Bearer owner-token')
+        .send({ question });
+    expect(response.status).toBe(200);
+    expect(response.body).toEqual({
+        data: { answer: expect.stringContaining('0 of 1 saved review') },
+    });
+    expect(response.body.data.answer).toContain(question);
 });
 
 test.each([

@@ -51,7 +51,7 @@ function hasControlCharacter(value) {
     });
 }
 
-function checkBatch(records, output, knownThemes) {
+function checkBatch(records, output, knownThemes, question) {
     if (
         !Array.isArray(output?.reviews) ||
         output.reviews.length !== records.length
@@ -77,6 +77,17 @@ function checkBatch(records, output, knownThemes) {
             if (
                 typeof item?.theme !== 'string' ||
                 !['complaint', 'other'].includes(item.kind) ||
+                !['direct', 'related'].includes(item.evidenceRelation) ||
+                !['supports', 'opposes', 'mixed', 'not_applicable'].includes(
+                    item.stance
+                ) ||
+                (item.evidenceRelation === 'related' &&
+                    item.stance !== 'not_applicable') ||
+                (item.evidenceRelation === 'direct' &&
+                    /^(?:do|does|did|is|are|can|could|will|would|has|have)\b/i.test(
+                        question
+                    ) &&
+                    item.stance === 'not_applicable') ||
                 !item.theme.trim() ||
                 item.theme.length > 100 ||
                 hasControlCharacter(item.theme) ||
@@ -91,6 +102,8 @@ function checkBatch(records, output, knownThemes) {
                 reviewId: record.reviewId,
                 theme: item.theme.trim(),
                 kind: item.kind,
+                evidenceRelation: item.evidenceRelation,
+                stance: item.stance,
                 excerpt: item.excerpt,
             });
         }
@@ -115,8 +128,30 @@ function checkBatch(records, output, knownThemes) {
     return findings;
 }
 
-function renderAnswer(question, groups, total) {
+function renderAnswer(
+    question,
+    groups,
+    total,
+    directReviewIds,
+    relatedReviewIds,
+    reviewStances
+) {
     const noun = total === 1 ? 'review' : 'reviews';
+    const directCount = directReviewIds.size;
+    const relatedCount = [...relatedReviewIds].filter(
+        (reviewId) => !directReviewIds.has(reviewId)
+    ).length;
+    const asksWhetherAnyReviewerReported =
+        /^(?:did|has|have)\s+(?:any|a|one)\s+(?:reviewers?|customers?)\b/i.test(
+            question
+        );
+    const asksYesOrNo =
+        /^(?:do|does|did|is|are|can|could|will|would|has|have)\b/i.test(
+            question
+        );
+    const asksForObjectiveClaim =
+        !/\b(?:reviewers?|customers?)\b/i.test(question) &&
+        (asksYesOrNo || /^(?:what is|how)\b/i.test(question));
     const asksAboutComplaints =
         /\b(complaints?|issues?|problems?|drawbacks?|defects?|failures?|trouble|concerns?|downsides?)\b/i.test(
             question
@@ -125,29 +160,107 @@ function renderAnswer(question, groups, total) {
         const caveat = asksAboutComplaints
             ? ' No complaint meets the frequent threshold.'
             : '';
-        return `No matching themes were found in ${total} saved ${noun}.${caveat}`;
+        return `No matching themes were found in ${total} saved ${noun}. 0 of ${total} saved ${noun} directly address the question. The reviews do not establish an answer to "${question}".${caveat}`;
     }
-    const lines = [`Analyzed ${total} saved ${noun}.`];
+    const lines = [
+        `Analyzed ${total} saved ${noun}.`,
+        `${directCount} of ${total} saved ${noun} directly ${directCount === 1 ? 'addresses' : 'address'} the question.`,
+    ];
+    if (relatedCount)
+        lines.push(
+            `${relatedCount} related ${relatedCount === 1 ? 'review mentions' : 'reviews mention'} context that does not directly answer it.`
+        );
     let frequentFound = false;
     let complaintFound = false;
     for (const group of groups) {
         const count = group.reviewIds.size;
-        if (group.kind === 'complaint') complaintFound = true;
+        if (group.kind === 'complaint' && group.evidenceRelation === 'direct')
+            complaintFound = true;
         const frequent =
-            group.kind === 'complaint' && count >= 4 && count / total >= 0.2;
+            group.evidenceRelation === 'direct' &&
+            group.kind === 'complaint' &&
+            count >= 4 &&
+            count / total >= 0.2;
         if (frequent) frequentFound = true;
         const label = frequent ? 'Frequent complaint: ' : '';
+        const relation =
+            group.evidenceRelation === 'related' ? 'Related observation: ' : '';
         const examples = group.excerpts
             .slice(0, 2)
             .map((excerpt) => `“${excerpt}”`)
             .join('; ');
         lines.push(
-            `${label}${group.theme}: ${count} of ${total} saved ${noun}. For example: ${examples}.`
+            `${relation}${label}${group.theme}: ${count} of ${total} saved ${noun}. For example: ${examples}.`
         );
     }
+    const supportingReviewIds = new Set();
+    let opposes = 0;
+    let mixed = 0;
+    for (const [reviewId, stances] of reviewStances) {
+        if (
+            stances.has('mixed') ||
+            (stances.has('supports') && stances.has('opposes'))
+        )
+            mixed += 1;
+        else if (stances.has('supports')) supportingReviewIds.add(reviewId);
+        else if (stances.has('opposes')) opposes += 1;
+    }
+    const supports = supportingReviewIds.size;
+    const sharedSupportTheme = groups.find(
+        (group) =>
+            group.evidenceRelation === 'direct' &&
+            group.supportReviewIds.size === supports &&
+            [...supportingReviewIds].every((reviewId) =>
+                group.supportReviewIds.has(reviewId)
+            )
+    );
+    if (supports && opposes)
+        lines.push(
+            `The reviewer reports conflict: ${supports} support and ${opposes} oppose the question${mixed ? `; ${mixed} are mixed` : ''}.`
+        );
+    if (supports === directCount && directCount === 2)
+        lines.push(
+            sharedSupportTheme
+                ? `Both reviewers who discussed this topic reported "${sharedSupportTheme.theme}".`
+                : 'Both reviewers who discussed this topic gave supporting reports.'
+        );
+    else if (supports > directCount / 2 && directCount > 1)
+        lines.push(
+            sharedSupportTheme
+                ? `Most of the reviewers who discussed this topic reported "${sharedSupportTheme.theme}" (${supports} of ${directCount}).`
+                : `Most of the reviewers who discussed this topic gave supporting reports (${supports} of ${directCount}).`
+        );
+    if (opposes === directCount && directCount === 2)
+        lines.push(
+            'Both reviewers who discussed this topic gave opposing reports.'
+        );
+    else if (opposes > directCount / 2 && directCount > 1)
+        lines.push(
+            `Most of the reviewers who discussed this topic gave opposing reports (${opposes} of ${directCount}).`
+        );
+    if (mixed === directCount && directCount === 2)
+        lines.push(
+            'Both reviewers who discussed this topic gave mixed reports.'
+        );
+    else if (mixed)
+        lines.push(
+            `${mixed} of ${directCount} direct reviewer reports are mixed.`
+        );
     if ((asksAboutComplaints || complaintFound) && !frequentFound)
         lines.push(
             'No complaint meets the frequent threshold of four reviews and 20% of this saved dataset.'
+        );
+    if (asksForObjectiveClaim)
+        lines.push(
+            `These reviewer reports do not establish the underlying product or safety fact in "${question}".`
+        );
+    else if (
+        directCount * 2 < total &&
+        !asksWhetherAnyReviewerReported &&
+        (asksYesOrNo || directCount === 0)
+    )
+        lines.push(
+            `The remaining ${total - directCount} saved ${total - directCount === 1 ? 'review does' : 'reviews do'} not directly address the question. These reports do not establish an overall answer to "${question}".`
         );
     return lines.join('\n');
 }
@@ -199,6 +312,9 @@ export async function answerQuestion(
 
     const groups = new Map();
     const knownThemes = new Map();
+    const directReviewIds = new Set();
+    const relatedReviewIds = new Set();
+    const reviewStances = new Map();
     for (const batch of context.batches) {
         const records = JSON.parse(batch.text).reviews;
         const analysisContext = {
@@ -224,21 +340,38 @@ export async function answerQuestion(
         const output = await analyzeBatch(question, batch.text, {
             existingThemes: analysisContext.existingThemes,
         });
-        for (const finding of checkBatch(records, output, knownThemes)) {
+        for (const finding of checkBatch(
+            records,
+            output,
+            knownThemes,
+            question
+        )) {
             if (!sourceIds.has(finding.reviewId)) throw invalidAnalysis();
+            if (finding.evidenceRelation === 'direct') {
+                directReviewIds.add(finding.reviewId);
+                if (!reviewStances.has(finding.reviewId))
+                    reviewStances.set(finding.reviewId, new Set());
+                if (finding.stance !== 'not_applicable')
+                    reviewStances.get(finding.reviewId).add(finding.stance);
+            } else relatedReviewIds.add(finding.reviewId);
             const canonical = canonicalTheme(finding.theme);
             if (!canonical) throw invalidAnalysis();
-            const key = `${canonical}\u0000${finding.kind}`;
-            if (!knownThemes.has(key))
-                knownThemes.set(key, finding.theme.trim());
-            if (!groups.has(key))
-                groups.set(key, {
+            const themeKey = `${canonical}\u0000${finding.kind}`;
+            if (!knownThemes.has(themeKey))
+                knownThemes.set(themeKey, finding.theme.trim());
+            const groupKey = `${themeKey}\u0000${finding.evidenceRelation}`;
+            if (!groups.has(groupKey))
+                groups.set(groupKey, {
                     theme: finding.theme,
                     kind: finding.kind,
+                    evidenceRelation: finding.evidenceRelation,
                     reviewIds: new Set(),
+                    supportReviewIds: new Set(),
                     excerpts: [],
                 });
-            const group = groups.get(key);
+            const group = groups.get(groupKey);
+            if (finding.stance === 'supports')
+                group.supportReviewIds.add(finding.reviewId);
             if (!group.reviewIds.has(finding.reviewId)) {
                 group.reviewIds.add(finding.reviewId);
                 if (group.excerpts.length < 2)
@@ -251,6 +384,9 @@ export async function answerQuestion(
         [...groups.values()].sort(
             (left, right) => right.reviewIds.size - left.reviewIds.size
         ),
-        context.sourceReviewCount
+        context.sourceReviewCount,
+        directReviewIds,
+        relatedReviewIds,
+        reviewStances
     );
 }
