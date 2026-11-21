@@ -18,7 +18,7 @@ The ticket asks for a polite redirection when a question is unrelated to the act
 
 ## Files changed
 
-- [reviewQaScope.test.js](../../apps/backend/tests/services/reviewQaScope.test.js) defines synthetic reviews, eight refusal cases and one grounded answer case. It checks that the mock receives the scoped system instruction, target labels, exact review evidence and each original question.
+- The original `reviewQaScope.test.js` defined eight refusal cases and a grounded control. The [authenticated route tests](../../apps/backend/tests/routes/analyzeProduct.test.js) now cover those cases and inspect the scoped system instruction, target labels, exact review evidence, and question at the provider boundary.
 - This record describes the evaluation and where to run it against the shared Q&A path once available.
 
 ## How it works
