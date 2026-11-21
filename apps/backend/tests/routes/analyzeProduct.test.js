@@ -75,6 +75,8 @@ beforeEach(() => {
                     {
                         theme: 'stopped working',
                         kind: 'complaint',
+                        evidenceRelation: 'direct',
+                        stance: 'not_applicable',
                         excerpt: 'stopped working',
                     },
                 ],

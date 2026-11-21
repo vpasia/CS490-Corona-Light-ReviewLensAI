@@ -65,6 +65,8 @@ function classify(question, evidence) {
                       {
                           theme: 'Stopped working',
                           kind: 'complaint',
+                          evidenceRelation: 'direct',
+                          stance: 'not_applicable',
                           excerpt: 'stopped working',
                       },
                   ]
@@ -172,6 +174,8 @@ describe('answers from owned saved review evidence', () => {
                             theme:
                                 context.existingThemes[0] ?? 'stopped working',
                             kind: 'complaint',
+                            evidenceRelation: 'direct',
+                            stance: 'not_applicable',
                             excerpt: record.text.includes('quit')
                                 ? 'quit after a week'
                                 : 'stopped working',
@@ -206,6 +210,8 @@ describe('answers from owned saved review evidence', () => {
                     {
                         theme: 'stopped working',
                         kind: 'complaint',
+                        evidenceRelation: 'direct',
+                        stance: 'not_applicable',
                         excerpt: record.text.includes('quit')
                             ? 'quit after a week'
                             : 'stopped working',
@@ -258,6 +264,8 @@ describe('answers from owned saved review evidence', () => {
                     {
                         theme: 'love the fit',
                         kind: 'other',
+                        evidenceRelation: 'direct',
+                        stance: 'not_applicable',
                         excerpt: 'love the fit',
                     },
                 ],
@@ -463,6 +471,8 @@ describe('answers from owned saved review evidence', () => {
                                     {
                                         theme: 'Frequent breakdowns',
                                         kind: 'complaint',
+                                        evidenceRelation: 'direct',
+                                        stance: 'not_applicable',
                                         excerpt: 'works well',
                                     },
                                 ],
@@ -470,6 +480,41 @@ describe('answers from owned saved review evidence', () => {
                         ],
                     })
                 )
+            )
+        ).rejects.toMatchObject({
+            code: 'UPSTREAM_PROVIDER_ERROR',
+            status: 502,
+        });
+    });
+
+    it.each([
+        { evidenceRelation: 'unknown', stance: 'not_applicable' },
+        { evidenceRelation: 'related', stance: 'supports' },
+        { evidenceRelation: 'direct', stance: 'unknown' },
+    ])('rejects invalid evidence classification %j', async (classification) => {
+        const db = setup(['The parking lot is well lit.']);
+        const analyzeBatch = jest.fn().mockResolvedValue({
+            reviews: [
+                {
+                    reviewId: 'review-1',
+                    partIndex: 0,
+                    themes: [
+                        {
+                            theme: 'parking lot',
+                            kind: 'other',
+                            excerpt: 'parking lot is well lit',
+                            ...classification,
+                        },
+                    ],
+                },
+            ],
+        });
+        await expect(
+            answerQuestion(
+                'owner',
+                'owned',
+                'Is the parking lot safe at night?',
+                options(db, analyzeBatch)
             )
         ).rejects.toMatchObject({
             code: 'UPSTREAM_PROVIDER_ERROR',

@@ -14,7 +14,10 @@ export const ANALYSIS_INSTRUCTION = [
     'When existing theme names are supplied, reuse one for the same customer experience.',
     'Otherwise choose a theme name that appears as a phrase in the exact excerpt.',
     'Mark a theme complaint only when the excerpt describes a negative product experience; otherwise mark it other.',
-    'Use an empty themes array when none applies.',
+    'For this question, mark each finding direct when it addresses the requested topic, or related when it provides context but cannot answer it.',
+    'For a yes-or-no opinion question, mark a direct reviewer report supports, opposes, or mixed relative to that question.',
+    'Use stance not_applicable for related findings and open-ended questions.',
+    'Use an empty themes array when the review contains no direct or related evidence; distinguish absent information from supported information.',
     'Do not infer facts absent from the supplied review text.',
 ].join(' ');
 
@@ -38,9 +41,28 @@ const RESPONSE_SCHEMA = {
                                     type: 'string',
                                     enum: ['complaint', 'other'],
                                 },
+                                evidenceRelation: {
+                                    type: 'string',
+                                    enum: ['direct', 'related'],
+                                },
+                                stance: {
+                                    type: 'string',
+                                    enum: [
+                                        'supports',
+                                        'opposes',
+                                        'mixed',
+                                        'not_applicable',
+                                    ],
+                                },
                                 excerpt: { type: 'string' },
                             },
-                            required: ['theme', 'kind', 'excerpt'],
+                            required: [
+                                'theme',
+                                'kind',
+                                'evidenceRelation',
+                                'stance',
+                                'excerpt',
+                            ],
                         },
                     },
                 },

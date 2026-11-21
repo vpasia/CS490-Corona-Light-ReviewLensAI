@@ -77,6 +77,12 @@ function checkBatch(records, output, knownThemes) {
             if (
                 typeof item?.theme !== 'string' ||
                 !['complaint', 'other'].includes(item.kind) ||
+                !['direct', 'related'].includes(item.evidenceRelation) ||
+                !['supports', 'opposes', 'mixed', 'not_applicable'].includes(
+                    item.stance
+                ) ||
+                (item.evidenceRelation === 'related' &&
+                    item.stance !== 'not_applicable') ||
                 !item.theme.trim() ||
                 item.theme.length > 100 ||
                 hasControlCharacter(item.theme) ||
@@ -91,6 +97,8 @@ function checkBatch(records, output, knownThemes) {
                 reviewId: record.reviewId,
                 theme: item.theme.trim(),
                 kind: item.kind,
+                evidenceRelation: item.evidenceRelation,
+                stance: item.stance,
                 excerpt: item.excerpt,
             });
         }
