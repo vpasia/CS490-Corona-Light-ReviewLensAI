@@ -2,6 +2,12 @@
 
 OpenAI Codex · November 18, 2026 · [Issue #56](https://github.com/vpasia/CS490-Corona-Light-ReviewLensAI/issues/56)
 
+## Shared flow integration — November 21, 2026
+
+Codex integrated the prompt after S2-011 (PR #77) and S2-012 (PR #78) merged. The shared `/analyze` route already authenticated the request, verified ownership, and loaded the selected review batches. The Gemini adapter had its own structured prompt. Both request formats now share the scope instructions and active target labels. The app still validates structured findings, exact excerpts, direct and related evidence, and stances before rendering the answer. Token checks include the instructions and target labels used for generation.
+
+Authenticated route tests capture the real adapter's mocked HTTP request and verify the prompt and selected evidence. Backend lint and all 245 coverage tests passed, including the existing grounded and insufficient-evidence cases. Line coverage was 93.80%. In a live synthetic route probe, Gemini 3.8 Flash token counting returned HTTP 200, generation timed out, and `/analyze` returned HTTP 502 `UPSTREAM_PROVIDER_ERROR`. The 23 Ask panel and hook tests passed. A signed-in browser run with an imported test dataset remains pending.
+
 ## Request and response
 
 **Prompt excerpt:** “For S2-013, build a source-controlled system prompt that uses the active target’s name and review platform from the server. Instruct the model to answer using the supplied reviews, acknowledge when evidence is missing, and decline unrelated questions or questions about a different product or platform.”

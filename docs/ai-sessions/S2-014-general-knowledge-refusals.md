@@ -2,6 +2,12 @@
 
 OpenAI Codex · November 18, 2026 · [Issue #57](https://github.com/vpasia/CS490-Corona-Light-ReviewLensAI/issues/57)
 
+## Shared flow integration — November 21, 2026
+
+Codex connected the scope rules to the merged `/analyze` route. Gemini's structured result now carries `outOfScope`. If every review batch is classified outside scope, the service returns a short redirect with HTTP 200 and `data.outOfScope: true`. An in-scope question with no relevant evidence still follows the S2-012 answer path. The route tests cover both results and reject a provider result that marks a batch out of scope while also returning findings.
+
+The automated tests exercise the real route and adapter with a mocked Gemini response. The separate live synthetic route probe timed out during Gemini 3.8 Flash generation, so the integrated model's live refusal remains unverified. See the [S2-013 shared flow record](S2-013-review-qa-prompt.md#shared-flow-integration--november-21-2026).
+
 ## Request and response
 
 **Prompt excerpt:** “For S2-014, add evaluation cases for general-knowledge questions, including paraphrases and at least one review question that should be answered. Use the prompt and review context to drive refusals. Use synthetic reviews and mock the model in automated tests. Distinguish what the mocks verify from anything verified against Gemini.”

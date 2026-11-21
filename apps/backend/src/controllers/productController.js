@@ -48,12 +48,12 @@ export async function getProductReviews(req, res) {
 }
 
 export async function analyzeProduct(req, res) {
-    const answer = await answerQuestion(
+    const result = await answerQuestion(
         req.user.uid,
         req.params.productId,
         req.body.question
     );
-    res.status(200).json({ data: { answer } });
+    res.status(200).json({ data: result });
 }
 
 export async function importProductReviews(req, res) {

@@ -4,13 +4,23 @@ import { getOwnedProduct } from './ownership.js';
 import { countGeminiTokens } from './geminiTokenCounter.js';
 import {
     ANALYSIS_OUTPUT_TOKEN_LIMIT,
-    ANALYSIS_INSTRUCTION,
     analyzeReviewBatch,
+    buildReviewAnalysisInput,
 } from './geminiReviewAnalyzer.js';
 
 const MAX_INPUT_TOKENS = 16384;
 const MAX_EVIDENCE_TOKENS = 8192;
 const SCHEMA_RESERVE_TOKENS = ANALYSIS_OUTPUT_TOKEN_LIMIT;
+
+function analysisText(target, question, evidence, existingThemes) {
+    const { systemInstruction, contents } = buildReviewAnalysisInput(
+        target,
+        question,
+        evidence,
+        existingThemes
+    );
+    return JSON.stringify(systemInstruction) + contents[0].parts[0].text;
+}
 
 function invalidAnalysis() {
     return new AppError(
@@ -66,7 +76,8 @@ function checkBatch(records, output, knownThemes, question) {
         if (
             typeof entry?.reviewId !== 'string' ||
             !Number.isSafeInteger(entry.partIndex) ||
-            !Array.isArray(entry.themes)
+            !Array.isArray(entry.themes) ||
+            (output.outOfScope === true && entry.themes.length !== 0)
         )
             throw invalidAnalysis();
         const key = recordKey(entry);
@@ -276,12 +287,9 @@ export async function answerQuestion(
         tokenLimit,
     } = {}
 ) {
-    await getOwnedProduct(uid, productId, db);
+    const target = await getOwnedProduct(uid, productId, db);
     const overhead = await countTokens(
-        JSON.stringify({
-            instruction: ANALYSIS_INSTRUCTION,
-            question,
-        })
+        analysisText(target, question, { reviews: [] }, [])
     );
     if (!Number.isSafeInteger(overhead) || overhead < 0)
         throw invalidAnalysis();
@@ -315,18 +323,12 @@ export async function answerQuestion(
     const directReviewIds = new Set();
     const relatedReviewIds = new Set();
     const reviewStances = new Map();
+    let allBatchesOutOfScope = true;
     for (const batch of context.batches) {
-        const records = JSON.parse(batch.text).reviews;
-        const analysisContext = {
-            question,
-            existingThemes: [...knownThemes.values()],
-            evidence: records,
-        };
+        const evidence = JSON.parse(batch.text);
+        const existingThemes = [...knownThemes.values()];
         const inputTokens = await countTokens(
-            JSON.stringify({
-                instruction: ANALYSIS_INSTRUCTION,
-                ...analysisContext,
-            })
+            analysisText(target, question, evidence, existingThemes)
         );
         if (!Number.isSafeInteger(inputTokens) || inputTokens < 0)
             throw invalidAnalysis();
@@ -338,10 +340,12 @@ export async function answerQuestion(
             );
         }
         const output = await analyzeBatch(question, batch.text, {
-            existingThemes: analysisContext.existingThemes,
+            target,
+            existingThemes,
         });
+        if (output?.outOfScope !== true) allBatchesOutOfScope = false;
         for (const finding of checkBatch(
-            records,
+            evidence.reviews,
             output,
             knownThemes,
             question
@@ -379,14 +383,22 @@ export async function answerQuestion(
             }
         }
     }
-    return renderAnswer(
-        question,
-        [...groups.values()].sort(
-            (left, right) => right.reviewIds.size - left.reviewIds.size
+    if (allBatchesOutOfScope) {
+        return {
+            answer: 'I can help with the supplied reviews for the active target. What would you like to know about those reviews?',
+            outOfScope: true,
+        };
+    }
+    return {
+        answer: renderAnswer(
+            question,
+            [...groups.values()].sort(
+                (left, right) => right.reviewIds.size - left.reviewIds.size
+            ),
+            context.sourceReviewCount,
+            directReviewIds,
+            relatedReviewIds,
+            reviewStances
         ),
-        context.sourceReviewCount,
-        directReviewIds,
-        relatedReviewIds,
-        reviewStances
-    );
+    };
 }

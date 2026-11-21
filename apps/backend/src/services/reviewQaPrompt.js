@@ -9,21 +9,23 @@ const REVIEW_QA_INSTRUCTIONS = [
     'When declining, explain that you can help with the active target’s supplied reviews and invite a question about them.',
 ].join('\n');
 
-// Use the owned product record and a serialized evidence batch from buildReviewContext.
-export function buildReviewQaRequest(
-    { productName, platform },
-    question,
-    reviewEvidence
+export function buildReviewQaSystemInstruction(
+    { productName, platform = 'amazon' },
+    analysisInstruction
 ) {
     const activeTarget = JSON.stringify({ productName, platform });
+    const parts = [
+        { text: REVIEW_QA_INSTRUCTIONS },
+        { text: `Active target: ${activeTarget}` },
+    ];
+    if (analysisInstruction) parts.push({ text: analysisInstruction });
+    return { parts };
+}
 
+// Free-text request used by the local Gemini smoke runner.
+export function buildReviewQaRequest(target, question, reviewEvidence) {
     return {
-        systemInstruction: {
-            parts: [
-                { text: REVIEW_QA_INSTRUCTIONS },
-                { text: `Active target: ${activeTarget}` },
-            ],
-        },
+        systemInstruction: buildReviewQaSystemInstruction(target),
         contents: [
             {
                 role: 'user',

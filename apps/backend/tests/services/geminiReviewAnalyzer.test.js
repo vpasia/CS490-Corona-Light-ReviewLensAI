@@ -22,7 +22,16 @@ function response(value, finishReason = 'STOP') {
             candidates: [
                 {
                     finishReason,
-                    content: { parts: [{ text: JSON.stringify(value) }] },
+                    content: {
+                        parts: [
+                            {
+                                text: JSON.stringify({
+                                    outOfScope: false,
+                                    ...value,
+                                }),
+                            },
+                        ],
+                    },
                 },
             ],
         }),
@@ -43,7 +52,7 @@ describe('Gemini review analysis', () => {
                 fetchImpl,
             }
         );
-        expect(result).toEqual({ reviews: [finding] });
+        expect(result).toEqual({ outOfScope: false, reviews: [finding] });
         const [url, request] = fetchImpl.mock.calls[0];
         expect(url).toContain('/models/gemini-3.8-flash:generateContent');
         expect(request.headers['x-goog-api-key']).toBe('fake-key');
@@ -63,8 +72,11 @@ describe('Gemini review analysis', () => {
             'direct',
             'related',
         ]);
-        expect(body.systemInstruction.parts[0].text).toMatch(/direct|related/i);
-        expect(body.systemInstruction.parts[0].text).toMatch(/absent|none/i);
+        expect(body.systemInstruction.parts[2].text).toMatch(/direct|related/i);
+        expect(body.systemInstruction.parts[2].text).toMatch(/absent|none/i);
+        expect(body.generationConfig.responseJsonSchema.required).toContain(
+            'outOfScope'
+        );
         expect(body.generationConfig.maxOutputTokens).toBe(2048);
     });
 
@@ -82,6 +94,10 @@ describe('Gemini review analysis', () => {
     it.each([
         [{ ok: false, status: 429 }, 'HTTP failure'],
         [response({ reviews: [] }, 'MAX_TOKENS'), 'truncated response'],
+        [
+            response({ reviews: [], outOfScope: undefined }),
+            'missing scope flag',
+        ],
         [
             { ok: true, json: async () => ({ candidates: [] }) },
             'missing candidate',
