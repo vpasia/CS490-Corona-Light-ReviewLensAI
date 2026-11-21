@@ -51,7 +51,7 @@ function hasControlCharacter(value) {
     });
 }
 
-function checkBatch(records, output, knownThemes) {
+function checkBatch(records, output, knownThemes, question) {
     if (
         !Array.isArray(output?.reviews) ||
         output.reviews.length !== records.length
@@ -83,6 +83,11 @@ function checkBatch(records, output, knownThemes) {
                 ) ||
                 (item.evidenceRelation === 'related' &&
                     item.stance !== 'not_applicable') ||
+                (item.evidenceRelation === 'direct' &&
+                    /^(?:do|does|did|is|are|can|could|will|would|has|have)\b/i.test(
+                        question
+                    ) &&
+                    item.stance === 'not_applicable') ||
                 !item.theme.trim() ||
                 item.theme.length > 100 ||
                 hasControlCharacter(item.theme) ||
@@ -146,7 +151,7 @@ function renderAnswer(
         );
     const asksForObjectiveClaim =
         !/\b(?:reviewers?|customers?)\b/i.test(question) &&
-        (asksYesOrNo || /^(?:what is|how long|how many)\b/i.test(question));
+        (asksYesOrNo || /^(?:what is|how)\b/i.test(question));
     const asksAboutComplaints =
         /\b(complaints?|issues?|problems?|drawbacks?|defects?|failures?|trouble|concerns?|downsides?)\b/i.test(
             question
@@ -250,7 +255,7 @@ function renderAnswer(
             `These reviewer reports do not establish the underlying product or safety fact in "${question}".`
         );
     else if (
-        directCount < total &&
+        directCount * 2 < total &&
         !asksWhetherAnyReviewerReported &&
         (asksYesOrNo || directCount === 0)
     )
@@ -335,7 +340,12 @@ export async function answerQuestion(
         const output = await analyzeBatch(question, batch.text, {
             existingThemes: analysisContext.existingThemes,
         });
-        for (const finding of checkBatch(records, output, knownThemes)) {
+        for (const finding of checkBatch(
+            records,
+            output,
+            knownThemes,
+            question
+        )) {
             if (!sourceIds.has(finding.reviewId)) throw invalidAnalysis();
             if (finding.evidenceRelation === 'direct') {
                 directReviewIds.add(finding.reviewId);

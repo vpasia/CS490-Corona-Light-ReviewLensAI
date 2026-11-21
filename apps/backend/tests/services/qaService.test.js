@@ -183,6 +183,44 @@ describe('answers from owned saved review evidence', () => {
         expect(answer).toMatch(/do not|cannot/);
     });
 
+    it('limits an open-ended safety question when only two reviews address it', async () => {
+        const question = 'How safe is the parking lot at night?';
+        const answer = await answerQuestion(
+            'owner',
+            'owned',
+            question,
+            options(
+                parkingDataset([
+                    'I felt safe in the parking lot at night.',
+                    'I felt safe walking to my car at night.',
+                ]),
+                jest.fn(parkingAnalysis)
+            )
+        );
+        expect(answer).toContain('2 of 15 saved reviews');
+        expect(answer).toContain(question);
+        expect(answer).toMatch(
+            /do not establish.*safety|do not establish.*overall/i
+        );
+    });
+
+    it('does not deny an overall reviewer-opinion answer from broad coverage', async () => {
+        const answer = await answerQuestion(
+            'owner',
+            'owned',
+            PARKING_QUESTION,
+            options(
+                parkingDataset(
+                    Array.from({ length: 14 }, () => 'I felt safe at night.')
+                ),
+                jest.fn(parkingAnalysis)
+            )
+        );
+        expect(answer).toContain('14 of 15 saved reviews');
+        expect(answer).toMatch(/most of the reviewers who discussed/i);
+        expect(answer).not.toContain('do not establish an overall answer');
+    });
+
     it('does not attribute one supporting theme to reviewers who used different words', async () => {
         const db = parkingDataset([
             'I felt safe walking there at night.',
@@ -354,6 +392,38 @@ describe('answers from owned saved review evidence', () => {
         );
         expect(answer).toContain('15 of 15 saved reviews');
         expect(answer).toMatch(/reviewer reports.*do not establish.*safety/i);
+    });
+
+    it('rejects a direct safety report without a stance for a yes-or-no question', async () => {
+        const db = setup(['I felt safe in the parking lot at night.']);
+        const analyzeBatch = jest.fn().mockResolvedValue({
+            reviews: [
+                {
+                    reviewId: 'review-1',
+                    partIndex: 0,
+                    themes: [
+                        {
+                            theme: 'felt safe',
+                            kind: 'other',
+                            evidenceRelation: 'direct',
+                            stance: 'not_applicable',
+                            excerpt: 'felt safe',
+                        },
+                    ],
+                },
+            ],
+        });
+        await expect(
+            answerQuestion(
+                'owner',
+                'owned',
+                'Is the parking lot safe at night?',
+                options(db, analyzeBatch)
+            )
+        ).rejects.toMatchObject({
+            code: 'UPSTREAM_PROVIDER_ERROR',
+            status: 502,
+        });
     });
 
     it.each([
