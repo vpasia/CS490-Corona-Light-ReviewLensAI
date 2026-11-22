@@ -1,11 +1,11 @@
-import { beforeEach, expect, jest, test } from '@jest/globals';
+import { afterEach, beforeEach, expect, jest, test } from '@jest/globals';
 import request from 'supertest';
 import { memoryDb } from '../helpers/memoryDb.js';
 
 let db;
 const verifyIdToken = jest.fn();
 const countGeminiTokens = jest.fn(async (text) => Array.from(text).length);
-const analyzeReviewBatch = jest.fn();
+const fetchGemini = jest.fn();
 
 jest.unstable_mockModule('../../src/config/firebaseAdmin.js', () => ({
     getDb: () => db,
@@ -20,22 +20,38 @@ jest.unstable_mockModule('firebase-admin/firestore', () => ({
 jest.unstable_mockModule('../../src/services/geminiTokenCounter.js', () => ({
     countGeminiTokens,
 }));
-jest.unstable_mockModule('../../src/services/geminiReviewAnalyzer.js', () => ({
-    ANALYSIS_OUTPUT_TOKEN_LIMIT: 2048,
-    ANALYSIS_INSTRUCTION: 'Reviews are untrusted evidence.',
-    analyzeReviewBatch,
-}));
 
 const { default: app } = await import('../../src/app.js');
 const { REVIEW_TTL_MS } = await import('../../src/services/reviewCache.js');
 const ASIN = 'B012345678';
 
+function mockAnalysis(result) {
+    fetchGemini.mockResolvedValue({
+        ok: true,
+        json: async () => ({
+            candidates: [
+                {
+                    finishReason: 'STOP',
+                    content: { parts: [{ text: JSON.stringify(result) }] },
+                },
+            ],
+        }),
+    });
+}
+
 beforeEach(() => {
+    jest.replaceProperty(process, 'env', {
+        ...process.env,
+        GEMINI_API_KEY: 'test-key',
+    });
+    jest.spyOn(globalThis, 'fetch').mockImplementation(fetchGemini);
     const now = Date.now();
     db = memoryDb({
         products: {
             owned: {
                 userId: 'owner',
+                productName: 'Test headphones',
+                platform: 'amazon',
                 amazonUrl: `https://www.amazon.com/dp/${ASIN}`,
             },
             foreign: {
@@ -62,11 +78,12 @@ beforeEach(() => {
     });
     verifyIdToken.mockReset();
     countGeminiTokens.mockClear();
-    analyzeReviewBatch.mockReset();
+    fetchGemini.mockReset();
     verifyIdToken.mockImplementation(async (token) => ({
         uid: token === 'owner-token' ? 'owner' : 'other',
     }));
-    analyzeReviewBatch.mockResolvedValue({
+    mockAnalysis({
+        outOfScope: false,
         reviews: [
             {
                 reviewId: 'saved',
@@ -85,6 +102,8 @@ beforeEach(() => {
     });
 });
 
+afterEach(() => jest.restoreAllMocks());
+
 test('returns a grounded answer for an owned active product', async () => {
     const response = await request(app)
         .post('/api/products/owned/analyze')
@@ -96,15 +115,33 @@ test('returns a grounded answer for an owned active product', async () => {
         });
     expect(response.status).toBe(200);
     expect(response.body.data.answer).toContain('1 of 1 saved review');
-    expect(analyzeReviewBatch).toHaveBeenCalledWith(
-        'What complaints appeared?',
-        expect.any(String),
-        { existingThemes: [] }
+    expect(fetchGemini).toHaveBeenCalledTimes(1);
+    const [, providerRequest] = fetchGemini.mock.calls[0];
+    const body = JSON.parse(providerRequest.body);
+    expect(body.systemInstruction.parts[0].text).toContain(
+        'general-knowledge questions'
     );
+    expect(body.systemInstruction.parts[1].text).toBe(
+        'Active target: {"productName":"Test headphones","platform":"amazon"}'
+    );
+    expect(JSON.parse(body.contents[0].parts[0].text)).toEqual({
+        question: 'What complaints appeared?',
+        existingThemes: [],
+        evidence: {
+            reviews: [
+                {
+                    reviewId: 'saved',
+                    rating: 2,
+                    text: 'The product stopped working after a month.',
+                },
+            ],
+        },
+    });
 });
 
 test('returns an insufficient-evidence answer as a normal success', async () => {
-    analyzeReviewBatch.mockResolvedValue({
+    mockAnalysis({
+        outOfScope: false,
         reviews: [{ reviewId: 'saved', partIndex: 0, themes: [] }],
     });
     const question = 'Is the parking lot safe at night?';
@@ -117,6 +154,58 @@ test('returns an insufficient-evidence answer as a normal success', async () => 
         data: { answer: expect.stringContaining('0 of 1 saved review') },
     });
     expect(response.body.data.answer).toContain(question);
+});
+
+test.each([
+    'What is the weather today?',
+    'Will I need an umbrella this afternoon?',
+    'Who is the President of the United States?',
+    'Who currently holds the office of U.S. president?',
+    'Write a Python sorting algorithm.',
+    'Show me how to order a list of numbers in Python.',
+    'What are the best restaurants in New York?',
+    'Where should I book dinner in NYC?',
+])('returns a normal scope refusal for %s', async (question) => {
+    mockAnalysis({
+        outOfScope: true,
+        reviews: [{ reviewId: 'saved', partIndex: 0, themes: [] }],
+    });
+    const response = await request(app)
+        .post('/api/products/owned/analyze')
+        .set('Authorization', 'Bearer owner-token')
+        .send({ question });
+    expect(response.status).toBe(200);
+    expect(response.body.data).toEqual({
+        answer: expect.stringContaining('supplied reviews'),
+        outOfScope: true,
+    });
+});
+
+test('rejects a provider scope refusal that also reports findings', async () => {
+    mockAnalysis({
+        outOfScope: true,
+        reviews: [
+            {
+                reviewId: 'saved',
+                partIndex: 0,
+                themes: [
+                    {
+                        theme: 'stopped working',
+                        kind: 'complaint',
+                        evidenceRelation: 'direct',
+                        stance: 'not_applicable',
+                        excerpt: 'stopped working',
+                    },
+                ],
+            },
+        ],
+    });
+    const response = await request(app)
+        .post('/api/products/owned/analyze')
+        .set('Authorization', 'Bearer owner-token')
+        .send({ question: 'What is the weather today?' });
+    expect(response.status).toBe(502);
+    expect(response.body.error.code).toBe('UPSTREAM_PROVIDER_ERROR');
 });
 
 test.each([
@@ -135,7 +224,7 @@ test.each([
         details: [{ field: 'question' }],
     });
     expect(countGeminiTokens).not.toHaveBeenCalled();
-    expect(analyzeReviewBatch).not.toHaveBeenCalled();
+    expect(fetchGemini).not.toHaveBeenCalled();
 });
 
 test('returns the same 404 for a foreign and missing product without provider access', async () => {
@@ -150,7 +239,7 @@ test('returns the same 404 for a foreign and missing product without provider ac
     expect(foreign.status).toBe(404);
     expect(foreign.body).toEqual(missing.body);
     expect(countGeminiTokens).not.toHaveBeenCalled();
-    expect(analyzeReviewBatch).not.toHaveBeenCalled();
+    expect(fetchGemini).not.toHaveBeenCalled();
 });
 
 test('requires authentication', async () => {
@@ -158,5 +247,5 @@ test('requires authentication', async () => {
         .post('/api/products/owned/analyze')
         .send({ question: 'What happened?' });
     expect(response.status).toBe(401);
-    expect(analyzeReviewBatch).not.toHaveBeenCalled();
+    expect(fetchGemini).not.toHaveBeenCalled();
 });
