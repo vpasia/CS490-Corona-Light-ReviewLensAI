@@ -54,7 +54,7 @@ describe('Gemini review analysis', () => {
         );
         expect(result).toEqual({ outOfScope: false, reviews: [finding] });
         const [url, request] = fetchImpl.mock.calls[0];
-        expect(url).toContain('/models/gemini-3.8-flash:generateContent');
+        expect(url).toContain('/models/gemini-3.6-flash:generateContent');
         expect(request.headers['x-goog-api-key']).toBe('fake-key');
         const body = JSON.parse(request.body);
         expect(body.systemInstruction.parts[0].text).toContain('untrusted');

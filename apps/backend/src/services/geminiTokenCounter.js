@@ -1,6 +1,6 @@
 import { AppError } from '../utils/AppError.js';
 
-const MODEL = 'gemini-3.8-flash';
+const MODEL = process.env.GEMINI_MODEL || 'gemini-3.6-flash';
 const COUNT_URL = `https://generativelanguage.googleapis.com/v1beta/models/${MODEL}:countTokens`;
 
 export async function countGeminiTokens(

@@ -1,7 +1,7 @@
 import { AppError } from '../utils/AppError.js';
 import { buildReviewQaSystemInstruction } from './reviewQaPrompt.js';
 
-const MODEL = 'gemini-3.8-flash';
+const MODEL = process.env.GEMINI_MODEL || 'gemini-3.6-flash';
 const URL = `https://generativelanguage.googleapis.com/v1beta/models/${MODEL}:generateContent`;
 export const ANALYSIS_OUTPUT_TOKEN_LIMIT = 2048;
 
@@ -161,6 +161,9 @@ export async function analyzeReviewBatch(
                         responseMimeType: 'application/json',
                         responseJsonSchema: RESPONSE_SCHEMA,
                         maxOutputTokens: ANALYSIS_OUTPUT_TOKEN_LIMIT,
+                        thinkingConfig: {
+                            thinkingLevel: "MEDIUM"
+                        }
                     },
                 }),
                 signal: controller.signal,

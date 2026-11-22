@@ -18,5 +18,30 @@
         "name": "grounded recurring review themes",
         "question": "What complaints do customers mention repeatedly in the reviews?",
         "expected_result_kind": "grounded"
+    },
+    {
+        "name": "grounded product specifications",
+        "question": "What is the battery capacity and how long does it last?",
+        "expected_result_kind": "grounded"
+    },
+    {
+        "name": "grounded positive feedback",
+        "question": "What do customers like most about this product?",
+        "expected_result_kind": "grounded"
+    },
+    {
+        "name": "insufficient review evidence",
+        "question": "Do customers report that this product lasts at least five years?",
+        "expected_result_kind": "insufficient_evidence"
+    },
+    {
+        "name": "insufficient product specifications",
+        "question": "Does this product support Bluetooth 5.4?",
+        "expected_result_kind": "insufficient_evidence"
+    },
+    {
+        "name": "insufficient review consensus",
+        "question": "Do most customers agree that this product is worth the price?",
+        "expected_result_kind": "insufficient_evidence"
     }
 ]
