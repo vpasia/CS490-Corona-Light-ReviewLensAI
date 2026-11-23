@@ -14,7 +14,7 @@ describe('Gemini token counting', () => {
             })
         ).toBe(17);
         expect(fetchImpl).toHaveBeenCalledWith(
-            'https://generativelanguage.googleapis.com/v1beta/models/gemini-3.8-flash:countTokens',
+            'https://generativelanguage.googleapis.com/v1beta/models/gemini-3.6-flash:countTokens',
             expect.objectContaining({
                 method: 'POST',
                 headers: {

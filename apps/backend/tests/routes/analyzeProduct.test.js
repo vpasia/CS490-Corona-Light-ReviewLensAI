@@ -280,6 +280,11 @@ test.each(entityScopeCases)(
                 outOfScope: true,
                 reviews: [{ reviewId: 'saved', partIndex: 0, themes: [] }],
             });
+        } else if (expected_result_kind === 'insufficient_evidence') {
+            mockAnalysis({
+                outOfScope: false,
+                reviews: [{ reviewId: 'saved', partIndex: 0, themes: [] }]
+            });
         }
         const response = await request(app)
             .post('/api/products/owned/analyze')
@@ -292,6 +297,9 @@ test.each(entityScopeCases)(
                 answer: expect.stringContaining('supplied reviews'),
                 outOfScope: true,
             });
+        } else if (expected_result_kind === 'insufficient_evidence') {
+            expect(response.body.data.answer).toContain(question);
+            expect(response.body.data.answer).toContain('0 of 1 saved review');
         } else {
             expect(response.body.data).toEqual({
                 answer: expect.stringContaining('stopped working'),
