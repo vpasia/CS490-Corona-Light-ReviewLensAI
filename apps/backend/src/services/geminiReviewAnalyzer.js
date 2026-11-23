@@ -162,7 +162,7 @@ export async function analyzeReviewBatch(
                         responseJsonSchema: RESPONSE_SCHEMA,
                         maxOutputTokens: ANALYSIS_OUTPUT_TOKEN_LIMIT,
                         thinkingConfig: {
-                            thinkingLevel: "MEDIUM"
+                            thinkingLevel: "LOW"
                         }
                     },
                 }),
