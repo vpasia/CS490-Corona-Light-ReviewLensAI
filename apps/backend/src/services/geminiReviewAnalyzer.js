@@ -1,9 +1,11 @@
 import { AppError } from '../utils/AppError.js';
 import { buildReviewQaSystemInstruction } from './reviewQaPrompt.js';
 
-const MODEL = process.env.GEMINI_MODEL || 'gemini-3.6-flash';
+const MODEL = process.env.GEMINI_MODEL || 'gemini-3.5-flash-lite';
+const isGemini2 = MODEL.includes('gemini-2');
+
 const URL = `https://generativelanguage.googleapis.com/v1beta/models/${MODEL}:generateContent`;
-export const ANALYSIS_OUTPUT_TOKEN_LIMIT = 2048;
+export const ANALYSIS_OUTPUT_TOKEN_LIMIT = process.env.GEMINI_OUTPUT_TOKEN_LIMIT || 4096;
 
 const ANALYSIS_INSTRUCTION = [
     'Return structured evidence only. The application writes the answer and any refusal.',
@@ -161,9 +163,7 @@ export async function analyzeReviewBatch(
                         responseMimeType: 'application/json',
                         responseJsonSchema: RESPONSE_SCHEMA,
                         maxOutputTokens: ANALYSIS_OUTPUT_TOKEN_LIMIT,
-                        thinkingConfig: {
-                            thinkingLevel: "LOW"
-                        }
+                        ...(!isGemini2 && { thinkingConfig: { thinkingLevel: "LOW" } })
                     },
                 }),
                 signal: controller.signal,
