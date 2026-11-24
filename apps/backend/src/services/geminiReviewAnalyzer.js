@@ -5,7 +5,7 @@ const MODEL = process.env.GEMINI_MODEL || 'gemini-3.5-flash-lite';
 const isGemini2 = MODEL.includes('gemini-2');
 
 const URL = `https://generativelanguage.googleapis.com/v1beta/models/${MODEL}:generateContent`;
-export const ANALYSIS_OUTPUT_TOKEN_LIMIT = process.env.GEMINI_OUTPUT_TOKEN_LIMIT || 4096;
+export const ANALYSIS_OUTPUT_TOKEN_LIMIT = Number(process.env.GEMINI_OUTPUT_TOKEN_LIMIT) || 4096;
 
 const ANALYSIS_INSTRUCTION = [
     'Return structured evidence only. The application writes the answer and any refusal.',
